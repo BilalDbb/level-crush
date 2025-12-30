@@ -1,0 +1,13 @@
+{
+  "settings": {
+    "app_name": "LEVEL CRUSH",
+    "base_xp": 215,
+    "exponent": 1.2,
+    "coeff_low": 200,
+    "coeff_high": 25,
+    "penalty_mode": "Exalté"
+  },
+  "progression": {
+    "title_unlock_levels": [3, 6, 10, 14, 19, 24, 30, 36, 43, 50, 58, 66, 75, 84, 93, 100]
+  }
+}
