@@ -7,7 +7,7 @@ from supabase import create_client, Client
 try:
     supabase: Client = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 except Exception as e:
-    st.error("Erreur de connexion Cloud.")
+    st.error(f"Erreur de connexion Cloud : {e}")
     st.stop()
 
 with open('config.json', 'r') as f:
@@ -17,24 +17,33 @@ with open('config.json', 'r') as f:
 MY_ID = "shadow_monarch_01" 
 
 def load_data():
+    """Récupère et nettoie la donnée de Supabase."""
     try:
-        # On demande la donnée et on trie par date de création (au cas où)
-        response = supabase.table('profiles').select('data').eq('user_id', MY_ID).order('created_at', descending=True).limit(1).execute()
-        if response.data:
-            return response.data[0]['data']
-    except Exception:
-        pass
+        response = supabase.table('profiles').select('data').eq('user_id', MY_ID).execute()
+        if response.data and len(response.data) > 0:
+            raw_data = response.data[0]['data']
+            
+            # SECURITÉ : Si Supabase renvoie du texte au lieu d'un dictionnaire, on le convertit
+            if isinstance(raw_data, str):
+                return json.loads(raw_data)
+            return raw_data
+    except Exception as e:
+        st.error(f"Erreur de lecture : {e}")
+    
+    # Si rien n'est trouvé, profil par défaut
     return {"level": 1, "xp": 0}
 
 def save_data(data):
-    # L'upsert va maintenant fonctionner parfaitement car user_id sera l'unique identifiant
-    supabase.table('profiles').upsert({"user_id": MY_ID, "data": data}).execute()
+    """Enregistre la donnée proprement."""
+    try:
+        supabase.table('profiles').upsert({"user_id": MY_ID, "data": data}).execute()
+    except Exception as e:
+        st.error(f"Erreur d'écriture : {e}")
 
-# --- 3. SESSION ---
+# --- 3. GESTION DE LA SESSION ---
+# On s'assure que session_state est TOUJOURS synchronisé
 if 'user_data' not in st.session_state:
     st.session_state.user_data = load_data()
-
-user = st.session_state.user_data
 
 # --- 4. CALCULS ---
 def get_xp_needed(lvl):
@@ -44,30 +53,37 @@ def get_xp_needed(lvl):
 # --- 5. UI ---
 st.set_page_config(page_title="LEVEL CRUSH", page_icon="⚡")
 
-st.info(random.choice([
-    "« Un Chasseur n'attend pas, il provoque sa chance. »",
-    "« Ta seule limite est celle que tu t'imposes. »"
-]))
-
 st.title(f"⚡ {config['settings']['app_name']}")
+
+# On travaille directement sur la session_state pour éviter les décalages
+user = st.session_state.user_data
 xp_target = get_xp_needed(user['level'])
 
-st.metric("NIVEAU", user['level'])
+st.metric("NIVEAU ACTUEL", user['level'])
 st.progress(min(user['xp'] / xp_target, 1.0))
 st.caption(f"XP : {user['xp']} / {xp_target}")
 
+st.divider()
+
 if st.button("🔥 EXÉCUTER QUÊTE (+215 XP)", use_container_width=True):
-    user['xp'] += 215
-    if user['xp'] >= xp_target:
-        user['level'] += 1
-        user['xp'] = 0
+    # Mise à jour
+    st.session_state.user_data['xp'] += 215
+    if st.session_state.user_data['xp'] >= xp_target:
+        st.session_state.user_data['level'] += 1
+        st.session_state.user_data['xp'] = 0
         st.balloons()
     
-    save_data(user)
-    st.session_state.user_data = user
+    # Sauvegarde du nouvel état
+    save_data(st.session_state.user_data)
     st.rerun()
 
+# --- 6. DEBUG (Très important ici) ---
 with st.sidebar:
-    if st.button("🔄 Synchro"):
+    st.header("⚙️ Système")
+    if st.button("🔄 Forcer Synchro"):
         st.session_state.user_data = load_data()
         st.rerun()
+    
+    st.divider()
+    st.write("Données brutes détectées :")
+    st.json(st.session_state.user_data)
