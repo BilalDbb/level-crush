@@ -25,6 +25,7 @@ MY_ID = "chasseur_unique_01"
 
 def load_from_supabase():
     try:
+        # On force la lecture sans cache
         response = supabase.table('profiles').select('data').eq('user_id', MY_ID).execute()
         if response.data and len(response.data) > 0:
             return response.data[0]['data']
@@ -34,26 +35,26 @@ def load_from_supabase():
 
 def save_to_supabase(data):
     try:
-        # On utilise .execute() et on attend la réponse pour être sûr que c'est écrit
+        # On attend la confirmation de l'écriture
         supabase.table('profiles').upsert({"user_id": MY_ID, "data": data}).execute()
     except Exception as e:
         st.error(f"Erreur de sauvegarde : {e}")
 
-# Initialisation de la donnée (si elle n'existe pas déjà dans cette session)
-if 'user_data' not in st.session_state:
+# --- 4. GESTION DE LA MÉMOIRE (SESSION) ---
+# Si c'est un premier chargement ou un rafraîchissement forcé
+if 'user_data' not in st.session_state or st.sidebar.button("🔄 Forcer Synchronisation"):
     st.session_state.user_data = load_from_supabase()
 
-# On crée un raccourci pour manipuler les données plus facilement
 user = st.session_state.user_data
 
-# --- 4. LOGIQUE XP ---
+# --- 5. LOGIQUE XP ---
 def get_xp_needed(lvl):
     coeff = config['settings']['coeff_low'] if lvl < 5 else config['settings']['coeff_high']
     xp = int(coeff * (lvl**config['settings']['exponent']))
     if lvl == 100: xp = xp * 2
     return xp
 
-# --- 5. INTERFACE (UI) ---
+# --- 6. INTERFACE (UI) ---
 st.set_page_config(page_title="LEVEL CRUSH", page_icon="⚡")
 
 quotes = [
@@ -82,20 +83,20 @@ st.divider()
 
 st.subheader("⚔️ Quête en cours")
 if st.button(f"S'entraîner dur (+215 XP)"):
-    # Mise à jour des valeurs
+    # Mise à jour locale
     user['xp'] += 215
     if user['xp'] >= xp_target:
         user['level'] += 1
         user['xp'] = 0
         st.balloons()
-        st.success(f"NIVEAU SUPÉRIEUR : {user['level']} !")
     
-    # SAUVEGARDE
+    # Écriture immédiate sur Supabase
     save_to_supabase(user)
     
-    # On force la session Streamlit à enregistrer les changements avant de recharger
+    # On met à jour la session state manuellement avant le rerun
     st.session_state.user_data = user
     st.rerun()
 
 with st.expander("🔍 Logs du Système"):
+    st.write("Données en mémoire vive :")
     st.json(st.session_state.user_data)
