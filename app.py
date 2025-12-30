@@ -1,76 +1,58 @@
 import streamlit as st
 import json
-import os
 
-# --- 1. CONFIGURATION & CHARGEMENT ---
-# On charge les règles du jeu que tu as définies (Base XP, etc.)
+# --- CONFIGURATION ---
 with open('config.json', 'r') as f:
     config = json.load(f)
 
-# Fonction pour charger ta progression (ton niveau, ton XP actuelle)
-def load_data():
-    if os.path.exists('save.json'):
-        with open('save.json', 'r') as f:
-            return json.load(f)
-    # Si le fichier n'existe pas encore (première fois), on crée un profil neuf
-    return {"level": 1, "xp": 0, "logs": []}
-
-# Fonction pour enregistrer ta progression
-def save_data(data):
-    with open('save.json', 'w') as f:
-        json.dump(data, f, indent=4)
-
-# Initialisation de la "Session" (C'est la mémoire vive de l'app tant que l'onglet est ouvert)
+# --- NOUVEAU SYSTÈME DE SAUVEGARDE (SECRETS) ---
+# On utilise st.session_state pour stocker les données durant la navigation
 if 'user_data' not in st.session_state:
-    st.session_state.user_data = load_data()
+    # On vérifie si une sauvegarde existe dans les "Secrets"
+    if "save_data" in st.secrets:
+        st.session_state.user_data = json.loads(st.secrets["save_data"])
+    else:
+        # Premier lancement : Profil neuf
+        st.session_state.user_data = {"level": 1, "xp": 0}
 
 user = st.session_state.user_data
 
-# --- 2. LOGIQUE DE CALCUL (MOTEUR XP) ---
+def save_progress():
+    # Transforme les données en texte pour le stockage
+    save_str = json.dumps(user)
+    # Note : Sur Streamlit Cloud, la mise à jour des secrets se fait manuellement
+    # Pour cette version, on va afficher le code de sauvegarde à copier-coller
+    # C'est la méthode la plus simple pour un débutant sans base de données complexe.
+    st.session_state.save_str = save_str
+
+# --- LOGIQUE XP ---
 def get_xp_needed(lvl):
-    # Tes règles : Coeff 200 avant lvl 5, sinon 25
     coeff = config['settings']['coeff_low'] if lvl < 5 else config['settings']['coeff_high']
     xp = int(coeff * (lvl**config['settings']['exponent']))
-    # Le mur du niveau 100 (x2)
-    if lvl == 100:
-        xp = xp * 2
+    if lvl == 100: xp = xp * 2
     return xp
 
-# --- 3. INTERFACE MOBILE-FIRST ---
-st.set_page_config(page_title="LEVEL CRUSH", page_icon="⚡")
+# --- INTERFACE ---
+st.title("⚡ LEVEL CRUSH")
 
-# Titre principal
-st.title(f"⚡ {config['settings']['app_name']}")
+xp_target = get_xp_needed(user['level'])
 
-# Sidebar : Le statut du Chasseur
-with st.sidebar:
-    st.header("👤 Statut")
-    st.write(f"Niveau : **{user['level']}**")
-    
-    # Calcul de la barre de progression
-    xp_target = get_xp_needed(user['level'])
-    progress = user['xp'] / xp_target
-    st.progress(min(progress, 1.0))
-    st.write(f"XP : {user['xp']} / {xp_target}")
-    
-    if st.button("Réinitialiser l'expérience"):
-        st.warning("Es-tu sûr de vouloir sacrifier ta puissance ?")
-        # Ici on ajoutera la citation de validation plus tard
-
-# Section Quêtes
-st.header("📜 Quêtes")
-# On crée un bouton simple pour tester le gain d'XP
-st.write("Valider une tâche quotidienne (Poids 1)")
-if st.button("Terminer la quête (+215 XP)"):
-    user['xp'] += 215 # Gain de base
-    
-    # Logique de montée de niveau
+if st.button(f"Terminer Quête (+215 XP)"):
+    user['xp'] += 215
     if user['xp'] >= xp_target:
         user['level'] += 1
-        user['xp'] = 0 # On remet l'XP à zéro pour le nouveau niveau
-        st.balloons() # Animation de fête
-        st.success(f"RANG SUPÉRIEUR ! Tu es maintenant niveau {user['level']} !")
-    
-    # Sauvegarde immédiate
-    save_data(user)
-    st.rerun() # On rafraîchit l'affichage
+        user['xp'] = 0
+        st.balloons()
+    save_progress()
+    st.rerun()
+
+# Affichage du statut
+st.metric("Niveau", user['level'])
+st.progress(min(user['xp'] / xp_target, 1.0))
+
+# ZONE DE SAUVEGARDE MANUELLE (Temporaire pour la V1)
+st.divider()
+if 'save_str' in st.session_state:
+    st.write("💾 **SAUVEGARDE DÉTECTÉE**")
+    st.write("Copie ce code et colle-le dans les 'Secrets' de Streamlit pour ne jamais perdre ta progression :")
+    st.code(st.session_state.save_str)
