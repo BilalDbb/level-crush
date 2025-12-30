@@ -1,31 +1,36 @@
 import streamlit as st
 import json
+from supabase import create_client, Client
 
-# --- CONFIGURATION ---
+# --- CONNEXION SUPABASE ---
+# On va chercher les clés dans les Secrets de Streamlit pour la sécurité
+url: str = st.secrets["SUPABASE_URL"]
+key: str = st.secrets["SUPABASE_KEY"]
+supabase: Client = create_client(url, key)
+
+# --- CONFIGURATION DU JEU ---
 with open('config.json', 'r') as f:
     config = json.load(f)
 
-# --- NOUVEAU SYSTÈME DE SAUVEGARDE (SECRETS) ---
-# On utilise st.session_state pour stocker les données durant la navigation
+# --- FONCTIONS DE SAUVEGARDE AUTOMATIQUE ---
+def load_from_supabase(user_id="mon_user_unique"):
+    # On cherche dans la table 'profiles' l'entrée qui correspond à ton ID
+    response = supabase.table('profiles').select('data').eq('user_id', user_id).execute()
+    if len(response.data) > 0:
+        return response.data[0]['data']
+    return {"level": 1, "xp": 0}
+
+def save_to_supabase(data, user_id="mon_user_unique"):
+    # On met à jour la base de données instantanément
+    supabase.table('profiles').upsert({"user_id": user_id, "data": data}).execute()
+
+# Initialisation
 if 'user_data' not in st.session_state:
-    # On vérifie si une sauvegarde existe dans les "Secrets"
-    if "save_data" in st.secrets:
-        st.session_state.user_data = json.loads(st.secrets["save_data"])
-    else:
-        # Premier lancement : Profil neuf
-        st.session_state.user_data = {"level": 1, "xp": 0}
+    st.session_state.user_data = load_from_supabase()
 
 user = st.session_state.user_data
 
-def save_progress():
-    # Transforme les données en texte pour le stockage
-    save_str = json.dumps(user)
-    # Note : Sur Streamlit Cloud, la mise à jour des secrets se fait manuellement
-    # Pour cette version, on va afficher le code de sauvegarde à copier-coller
-    # C'est la méthode la plus simple pour un débutant sans base de données complexe.
-    st.session_state.save_str = save_str
-
-# --- LOGIQUE XP ---
+# --- LOGIQUE XP (Inchangée) ---
 def get_xp_needed(lvl):
     coeff = config['settings']['coeff_low'] if lvl < 5 else config['settings']['coeff_high']
     xp = int(coeff * (lvl**config['settings']['exponent']))
@@ -33,26 +38,22 @@ def get_xp_needed(lvl):
     return xp
 
 # --- INTERFACE ---
-st.title("⚡ LEVEL CRUSH")
+st.title("⚡ LEVEL CRUSH : AUTO-SAVE")
 
 xp_target = get_xp_needed(user['level'])
 
-if st.button(f"Terminer Quête (+215 XP)"):
+if st.button("Terminer Quête (+215 XP)"):
     user['xp'] += 215
     if user['xp'] >= xp_target:
         user['level'] += 1
         user['xp'] = 0
         st.balloons()
-    save_progress()
+    
+    # SAUVEGARDE AUTOMATIQUE
+    save_to_supabase(user)
+    st.success("Progression synchronisée avec le Cloud !")
     st.rerun()
 
-# Affichage du statut
-st.metric("Niveau", user['level'])
+st.metric("Niveau actuel", user['level'])
 st.progress(min(user['xp'] / xp_target, 1.0))
-
-# ZONE DE SAUVEGARDE MANUELLE (Temporaire pour la V1)
-st.divider()
-if 'save_str' in st.session_state:
-    st.write("💾 **SAUVEGARDE DÉTECTÉE**")
-    st.write("Copie ce code et colle-le dans les 'Secrets' de Streamlit pour ne jamais perdre ta progression :")
-    st.code(st.session_state.save_str)
+st.write(f"XP : {user['xp']} / {xp_target}")
