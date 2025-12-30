@@ -37,72 +37,67 @@ user = st.session_state.user_data
 if 'completed_quests' not in st.session_state:
     st.session_state.completed_quests = []
 
-# --- 4. CALCULS (Selon ton tableau de bord) ---
+# --- 4. CALCULS ---
 def get_xp_needed(lvl):
-    # Utilisation des coefficients précis de ton image
     coeff = config['settings']['coeff_low'] if lvl < 5 else config['settings']['coeff_high']
     xp_palier = int(coeff * (lvl**config['settings']['exponent']))
     return xp_palier * 2 if lvl == 100 else xp_palier
 
 # --- 5. INTERFACE ---
 st.set_page_config(page_title="LEVEL CRUSH", page_icon="⚡")
-
 st.title(f"⚡ {config['settings']['app_name']}")
 
+# Calcul du palier actuel
 xp_target = get_xp_needed(user['level'])
 
 # Affichage HUD
 col1, col2 = st.columns(2)
 col1.metric("NIVEAU", user['level'])
 col2.metric("XP ACTUELLE", f"{user['xp']} / {xp_target}")
-
 st.progress(min(user['xp'] / xp_target, 1.0))
 
 st.divider()
 
-# --- SYSTÈME DE QUÊTES AVEC PONDÉRATION (1 à 4) ---
+# --- SYSTÈME DE QUÊTES AVEC REPORT D'XP ---
 st.subheader("📋 Objectifs du Jour")
 
-# Définition des tâches avec leur poids (1 à 4)
-# Base XP est de 215 d'après ton tableau
-BASE_XP = config['settings']['base_xp'] 
+BASE_XP = 150 # Nouvelle base demandée
 
 daily_tasks = [
-    {"id": "pushups", "name": "💪 Faire 100 pompes", "weight": 3}, # Poids 3 (Intense)
-    {"id": "abs", "name": "🧘 Faire 100 abdos", "weight": 2},     # Poids 2 (Moyen)
-    {"id": "read", "name": "📖 Lire 20 pages", "weight": 1},      # Poids 1 (Régulier)
+    {"id": "pushups", "name": "💪 Faire 100 pompes", "weight": 3}, 
+    {"id": "abs", "name": "🧘 Faire 100 abdos", "weight": 2},     
+    {"id": "read", "name": "📖 Lire 20 pages", "weight": 1},      
 ]
 
 for task in daily_tasks:
     c1, c2 = st.columns([3, 1])
-    
     is_done = task['id'] in st.session_state.completed_quests
     gain_xp = BASE_XP * task['weight']
     
     status_icon = "✅" if is_done else "🔳"
     c1.write(f"{status_icon} **{task['name']}**")
-    c1.caption(f"Difficulté : Poids {task['weight']} | Récompense : +{gain_xp} XP")
+    c1.caption(f"Gain : +{gain_xp} XP")
     
     if not is_done:
         if c2.button("Valider", key=task['id'], use_container_width=True):
+            # AJOUT DE L'XP
             user['xp'] += gain_xp
             st.session_state.completed_quests.append(task['id'])
             
-            if user['xp'] >= xp_target:
+            # BOUCLE DE PASSAGE DE NIVEAU (Gère les surplus massifs)
+            while user['xp'] >= get_xp_needed(user['level']):
+                xp_needed = get_xp_needed(user['level'])
+                user['xp'] -= xp_needed # On soustrait le coût du niveau (le surplus reste)
                 user['level'] += 1
-                user['xp'] = 0
                 st.balloons()
+                st.success(f"NIVEAU {user['level']} ATTEINT !")
             
             save_data(user)
             st.rerun()
     else:
-        c2.button("Terminé", key=task['id'], disabled=True, use_container_width=True)
+        c2.button("Fait", key=task['id'], disabled=True, use_container_width=True)
 
-# --- 6. BARRE LATÉRALE ---
 with st.sidebar:
-    if st.button("🔄 Nouvelle Journée (Reset)"):
+    if st.button("🔄 Nouvelle Journée"):
         st.session_state.completed_quests = []
         st.rerun()
-    st.divider()
-    st.write("Calculateur :")
-    st.info(f"Base XP ({BASE_XP}) x Poids = Gain")
