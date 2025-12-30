@@ -3,100 +3,95 @@ import json
 import random
 from supabase import create_client, Client
 
-# --- 1. CONNEXION SUPABASE ---
+# --- 1. INITIALISATION DU SYSTÈME ---
+# Connexion sécurisée à la base de données via les Secrets
 try:
-    url: str = st.secrets["SUPABASE_URL"]
-    key: str = st.secrets["SUPABASE_KEY"]
-    supabase: Client = create_client(url, key)
+    supabase: Client = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 except Exception as e:
-    st.error("Erreur de configuration des Secrets.")
+    st.error("Échec de connexion au Système. Vérifie tes Secrets Streamlit.")
     st.stop()
 
-# --- 2. CONFIGURATION DU JEU ---
+# Chargement de la configuration (règles d'XP)
 try:
     with open('config.json', 'r') as f:
         config = json.load(f)
 except FileNotFoundError:
-    st.error("Fichier config.json introuvable.")
+    st.error("Fichier config.json introuvable sur GitHub.")
     st.stop()
 
-# --- 3. FONCTIONS DE SAUVEGARDE ---
-MY_ID = "chasseur_unique_01" 
+# --- 2. GESTION DES DONNÉES (SUPABASE) ---
+MY_ID = "shadow_monarch_01" 
 
-def load_from_supabase():
+def load_data():
+    """Récupère ton profil depuis le Cloud ou crée un profil neuf."""
     try:
-        # On force la lecture sans cache
         response = supabase.table('profiles').select('data').eq('user_id', MY_ID).execute()
-        if response.data and len(response.data) > 0:
+        if response.data:
             return response.data[0]['data']
-    except Exception as e:
-        st.warning(f"Note : Lecture impossible ({e}).")
+    except Exception:
+        pass # En cas d'erreur, on renvoie le profil par défaut ci-dessous
     return {"level": 1, "xp": 0}
 
-def save_to_supabase(data):
-    try:
-        # On attend la confirmation de l'écriture
-        supabase.table('profiles').upsert({"user_id": MY_ID, "data": data}).execute()
-    except Exception as e:
-        st.error(f"Erreur de sauvegarde : {e}")
+def save_data(data):
+    """Enregistre instantanément ta progression sur le Cloud."""
+    # Grâce à ta 'Primary Key' sur user_id, Supabase sait qu'il doit écraser la ligne
+    supabase.table('profiles').upsert({"user_id": MY_ID, "data": data}).execute()
 
-# --- 4. GESTION DE LA MÉMOIRE (SESSION) ---
-# Si c'est un premier chargement ou un rafraîchissement forcé
-if 'user_data' not in st.session_state or st.sidebar.button("🔄 Forcer Synchronisation"):
-    st.session_state.user_data = load_from_supabase()
+# --- 3. CHARGEMENT DE LA SESSION ---
+if 'user_data' not in st.session_state:
+    st.session_state.user_data = load_data()
 
 user = st.session_state.user_data
 
-# --- 5. LOGIQUE XP ---
+# --- 4. LOGIQUE DU MOTEUR D'XP ---
 def get_xp_needed(lvl):
     coeff = config['settings']['coeff_low'] if lvl < 5 else config['settings']['coeff_high']
     xp = int(coeff * (lvl**config['settings']['exponent']))
-    if lvl == 100: xp = xp * 2
-    return xp
+    return xp * 2 if lvl == 100 else xp
 
-# --- 6. INTERFACE (UI) ---
-st.set_page_config(page_title="LEVEL CRUSH", page_icon="⚡")
+# --- 5. INTERFACE UTILISATEUR (UI) ---
+st.set_page_config(page_title="LEVEL CRUSH", page_icon="⚡", layout="centered")
 
+# Système d'immersion (Citations)
 quotes = [
-    "« Le seul moyen de devenir plus fort est de se battre contre soi-même. » — Solo Leveling",
-    "« Si tu n'aimes pas ton destin, ne l'accepte pas. » — Naruto",
-    "« Les limites n'existent que si tu les laisses exister. » — Vegeta (DBZ)",
-    "« Travailler dur est inutile pour ceux qui ne croient pas en eux-mêmes. » — Naruto"
+    "« Le seul moyen de devenir plus fort est de se battre contre soi-même. »",
+    "« L'échec est le sel qui donne sa saveur à la victoire. »",
+    "« Ne t'arrête pas quand tu es fatigué, arrête-toi quand tu as fini. »"
 ]
-
 st.info(random.choice(quotes))
-st.title(f"⚡ {config['settings']['app_name']}")
 
+# Affichage des statistiques
+st.title(f"⚡ {config['settings']['app_name']}")
 xp_target = get_xp_needed(user['level'])
 
 col1, col2 = st.columns(2)
-with col1:
-    st.metric("Niveau actuel", user['level'])
-with col2:
-    st.metric("XP Totale", user['xp'])
+col1.metric("NIVEAU", user['level'])
+col2.metric("XP", f"{user['xp']} / {xp_target}")
 
-progress = min(user['xp'] / xp_target, 1.0)
-st.progress(progress)
-st.caption(f"XP : {user['xp']} / {xp_target}")
+st.progress(min(user['xp'] / xp_target, 1.0))
 
 st.divider()
 
-st.subheader("⚔️ Quête en cours")
-if st.button(f"S'entraîner dur (+215 XP)"):
-    # Mise à jour locale
+# Action de Quête
+st.subheader("⚔️ ENTRAÎNEMENT")
+if st.button("🔥 EXÉCUTER LA QUÊTE (+215 XP)", use_container_width=True):
     user['xp'] += 215
+    
+    # Montée de niveau
     if user['xp'] >= xp_target:
         user['level'] += 1
         user['xp'] = 0
         st.balloons()
+        st.success(f"NIVEAU ATTEINT : {user['level']} !")
     
-    # Écriture immédiate sur Supabase
-    save_to_supabase(user)
-    
-    # On met à jour la session state manuellement avant le rerun
+    # Synchronisation immédiate
+    save_data(user)
     st.session_state.user_data = user
     st.rerun()
 
-with st.expander("🔍 Logs du Système"):
-    st.write("Données en mémoire vive :")
-    st.json(st.session_state.user_data)
+# --- 6. BARRE LATÉRALE (OPTIONS) ---
+with st.sidebar:
+    st.header("⚙️ SYSTÈME")
+    if st.button("🔄 Forcer la Synchro"):
+        st.session_state.user_data = load_data()
+        st.rerun()
