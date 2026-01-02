@@ -20,7 +20,7 @@ def load_data():
             raw_data = response.data[0]['data']
             data = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
             
-            # Initialisation des listes si elles n'existent pas encore
+            # Initialisation des listes si manquantes
             if "task_lists" not in data:
                 data["task_lists"] = {
                     "Quotidiennes": ["Pompes", "Abdos", "Lecture", "Rangement"],
@@ -48,7 +48,6 @@ def save_data(data):
     except Exception as e:
         st.error(f"Erreur de sauvegarde : {e}")
 
-# Initialisation session Streamlit
 if 'user_data' not in st.session_state:
     st.session_state.user_data = load_data()
 
@@ -64,16 +63,13 @@ def get_xp_needed(lvl):
 # --- 4. INTERFACE ---
 st.set_page_config(page_title="LEVEL CRUSH", page_icon="⚡", layout="centered")
 
-# HUD Supérieur
 xp_target = get_xp_needed(user['level'])
 st.title(f"⚡ NIVEAU {user['level']}")
 st.progress(min(user['xp'] / xp_target, 1.0))
 st.caption(f"XP : {user['xp']} / {xp_target}")
 
-# Création des onglets
 tab_quests, tab_stats, tab_config = st.tabs(["⚔️ Quêtes", "📊 État", "⚙️ Config"])
 
-# Configuration des récompenses
 quest_configs = {
     "Quotidiennes": {"base": 150, "max_w": 3},
     "Hebdomadaires": {"base": 500, "max_w": 5},
@@ -84,8 +80,6 @@ quest_configs = {
 
 # --- ONGLET 1 : QUÊTES ---
 with tab_quests:
-    st.subheader("📋 Objectifs Actuels")
-    
     any_task = False
     for q_type, q_info in quest_configs.items():
         tasks = user["task_lists"].get(q_type, [])
@@ -102,15 +96,65 @@ with tab_quests:
                     if not is_done:
                         s = c2.selectbox("Stat", ["Physique", "Connaissances", "Autonomie", "Mental"], key=f"s_{t_id}")
                         w = c3.select_slider("Poids", options=list(range(1, q_info['max_w'] + 1)), key=f"w_{t_id}")
-                        
                         if c4.button("Valider", key=t_id, use_container_width=True):
                             user['xp'] += (q_info['base'] * w)
                             user['stats'][s] += w
                             user["completed_quests"].append(t_id)
-                            # Gestion passage niveau
                             while user['xp'] >= get_xp_needed(user['level']):
                                 user['xp'] -= get_xp_needed(user['level'])
                                 user['level'] += 1
                             save_data(user)
                             st.rerun()
                     else:
+                        c2.empty() # Remplissage pour garder l'alignement
+                        c3.empty()
+                        c4.button("Fait", key=t_id, disabled=True, use_container_width=True)
+    
+    if not any_task:
+        st.info("Utilise l'onglet 'Config' pour ajouter tes premiers objectifs.")
+
+# --- ONGLET 2 : STATS ---
+with tab_stats:
+    st.subheader("📊 Caractéristiques")
+    sc1, sc2 = st.columns(2)
+    sc1.metric("Physique", user['stats']['Physique'])
+    sc1.metric("Connaissances", user['stats']['Connaissances'])
+    sc2.metric("Autonomie", user['stats']['Autonomie'])
+    sc2.metric("Mental", user['stats']['Mental'])
+
+# --- ONGLET 3 : CONFIGURATION ---
+with tab_config:
+    st.subheader("⚙️ Gestionnaire de Quêtes")
+    cat = st.selectbox("Catégorie :", list(quest_configs.keys()))
+    
+    new_t = st.text_input(f"Nouvel objectif {cat} :")
+    if st.button("Ajouter", use_container_width=True):
+        if new_t and new_t not in user["task_lists"][cat]:
+            user["task_lists"][cat].append(new_t)
+            save_data(user)
+            st.rerun()
+    
+    st.divider()
+    for t in user["task_lists"][cat]:
+        col_t, col_del = st.columns([4, 1])
+        col_t.write(f"- {t}")
+        if col_del.button("❌", key=f"del_{cat}_{t}"):
+            user["task_lists"][cat].remove(t)
+            t_id = f"{cat}_{t}"
+            if t_id in user["completed_quests"]:
+                user["completed_quests"].remove(t_id)
+            save_data(user)
+            st.rerun()
+
+# --- SIDEBAR ---
+with st.sidebar:
+    if st.button("🔄 Reset Quotidiennes"):
+        user["completed_quests"] = [q for q in user["completed_quests"] if not q.startswith("Quotidiennes")]
+        save_data(user)
+        st.rerun()
+    if st.button("🔄 Reset Total"):
+        user["completed_quests"] = []
+        save_data(user)
+        st.rerun()
+    st.divider()
+    st.json(user)
