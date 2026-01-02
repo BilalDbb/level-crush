@@ -10,9 +10,6 @@ except Exception as e:
     st.error(f"Erreur Cloud : {e}")
     st.stop()
 
-with open('config.json', 'r') as f:
-    config = json.load(f)
-
 # --- 2. LOGIQUE DONNÉES ---
 MY_ID = "shadow_monarch_01" 
 
@@ -37,32 +34,32 @@ user = st.session_state.user_data
 if 'completed_quests' not in st.session_state:
     st.session_state.completed_quests = []
 
-# --- 4. CALCULS ---
+# --- 4. CALCULS (Exposant 1,25) ---
 def get_xp_needed(lvl):
-    coeff = config['settings']['coeff_low'] if lvl < 5 else config['settings']['coeff_high']
-    xp_palier = int(coeff * (lvl**config['settings']['exponent']))
+    # Paramètres mis à jour selon tes instructions
+    exponent = 1.25 
+    coeff = 200 if lvl < 5 else 25 # Coeffs basés sur ton tableau
+    
+    xp_palier = int(coeff * (lvl**exponent))
     return xp_palier * 2 if lvl == 100 else xp_palier
 
 # --- 5. INTERFACE ---
 st.set_page_config(page_title="LEVEL CRUSH", page_icon="⚡")
-st.title(f"⚡ {config['settings']['app_name']}")
+st.title("⚡ LEVEL CRUSH")
 
-# Calcul du palier actuel
 xp_target = get_xp_needed(user['level'])
 
-# Affichage HUD
 col1, col2 = st.columns(2)
 col1.metric("NIVEAU", user['level'])
-col2.metric("XP ACTUELLE", f"{user['xp']} / {xp_target}")
+col2.metric("XP", f"{user['xp']} / {xp_target}")
 st.progress(min(user['xp'] / xp_target, 1.0))
 
 st.divider()
 
-# --- SYSTÈME DE QUÊTES AVEC REPORT D'XP ---
+# --- SYSTÈME DE QUÊTES ---
 st.subheader("📋 Objectifs du Jour")
 
-BASE_XP = 150 # Nouvelle base demandée
-
+BASE_XP = 150 
 daily_tasks = [
     {"id": "pushups", "name": "💪 Faire 100 pompes", "weight": 3}, 
     {"id": "abs", "name": "🧘 Faire 100 abdos", "weight": 2},     
@@ -80,17 +77,14 @@ for task in daily_tasks:
     
     if not is_done:
         if c2.button("Valider", key=task['id'], use_container_width=True):
-            # AJOUT DE L'XP
             user['xp'] += gain_xp
             st.session_state.completed_quests.append(task['id'])
             
-            # BOUCLE DE PASSAGE DE NIVEAU (Gère les surplus massifs)
+            # Boucle de niveau avec report d'XP
             while user['xp'] >= get_xp_needed(user['level']):
-                xp_needed = get_xp_needed(user['level'])
-                user['xp'] -= xp_needed # On soustrait le coût du niveau (le surplus reste)
+                user['xp'] -= get_xp_needed(user['level'])
                 user['level'] += 1
                 st.balloons()
-                st.success(f"NIVEAU {user['level']} ATTEINT !")
             
             save_data(user)
             st.rerun()
@@ -98,6 +92,7 @@ for task in daily_tasks:
         c2.button("Fait", key=task['id'], disabled=True, use_container_width=True)
 
 with st.sidebar:
+    st.header("⚙️ Système")
     if st.button("🔄 Nouvelle Journée"):
         st.session_state.completed_quests = []
         st.rerun()
