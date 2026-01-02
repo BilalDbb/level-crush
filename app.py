@@ -1,5 +1,6 @@
 import streamlit as st
 import json
+from datetime import datetime
 from supabase import create_client, Client
 
 # --- 1. CONNEXION ---
@@ -18,23 +19,33 @@ def load_data():
         if response.data and len(response.data) > 0:
             raw_data = response.data[0]['data']
             data = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
+            # Initialisation si nouvelles clés manquantes
             if "stats" not in data:
                 data["stats"] = {"Physique": 0, "Connaissances": 0, "Autonomie": 0, "Mental": 0}
+            if "last_reset" not in data:
+                data["last_reset"] = datetime.now().strftime("%Y-%m-%d")
+            if "completed_today" not in data:
+                data["completed_today"] = []
             return data
     except: pass
-    return {"level": 1, "xp": 0, "stats": {"Physique": 0, "Connaissances": 0, "Autonomie": 0, "Mental": 0}}
+    return {
+        "level": 1, "xp": 0, 
+        "stats": {"Physique": 0, "Connaissances": 0, "Autonomie": 0, "Mental": 0},
+        "last_reset": datetime.now().strftime("%Y-%m-%d"),
+        "completed_today": []
+    }
 
 def save_data(data):
     supabase.table('profiles').upsert({"user_id": MY_ID, "data": data}).execute()
 
-# --- 3. SESSION ---
-if 'user_data' not in st.session_state:
-    st.session_state.user_data = load_data()
+# --- 3. GESTION DU TEMPS (RESET AUTO) ---
+user = load_data()
+today = datetime.now().strftime("%Y-%m-%d")
 
-user = st.session_state.user_data
-
-if 'completed_quests' not in st.session_state:
-    st.session_state.completed_quests = []
+if user["last_reset"] != today:
+    user["completed_today"] = []
+    user["last_reset"] = today
+    save_data(user)
 
 # --- 4. CALCULS ---
 def get_xp_needed(lvl):
@@ -49,37 +60,35 @@ st.title("⚡ LEVEL CRUSH")
 
 xp_target = get_xp_needed(user['level'])
 
-# --- HUD PRINCIPAL ---
+# HUD
 col1, col2 = st.columns(2)
-col1.metric("NIVEAU GLOBAL", user['level'])
+col1.metric("NIVEAU", user['level'])
 col2.metric("XP", f"{user['xp']} / {xp_target}")
 st.progress(min(user['xp'] / xp_target, 1.0))
 
-# --- AFFICHAGE DES CARACTÉRISTIQUES ---
+# STATS
 st.write("### 📊 Caractéristiques")
-s_col1, s_col2, s_col3, s_col4 = st.columns(4)
-s_col1.metric("💪 Phy", user['stats']['Physique'])
-s_col2.metric("🧠 Con", user['stats']['Connaissances'])
-s_col3.metric("🛠️ Aut", user['stats']['Autonomie'])
-s_col4.metric("🧘 Men", user['stats']['Mental'])
+s_col = st.columns(4)
+stats_keys = list(user['stats'].keys())
+for i in range(4):
+    s_col[i].metric(stats_keys[i][:3], user['stats'][stats_keys[i]])
 
 st.divider()
 
-# --- SYSTÈME DE QUÊTES ---
+# --- SYSTÈME DE QUÊTES (4 SLOTS) ---
 st.subheader("📋 Objectifs du Jour")
 
 BASE_XP = 150 
 daily_tasks = [
     {"id": "pushups", "name": "💪 Faire 100 pompes", "weight": 3, "stat": "Physique"}, 
     {"id": "abs", "name": "🧘 Faire 100 abdos", "weight": 2, "stat": "Physique"},     
-    {"id": "read", "name": "📖 Lire 20 pages", "weight": 1, "stat": "Connaissances"},
-    {"id": "admin", "name": "🛠️ Gestion administrative / Rangement", "weight": 2, "stat": "Autonomie"},
-    {"id": "medit", "name": "🧘 10min Discipline / Méditation", "weight": 1, "stat": "Mental"},
+    {"id": "read", "name": "📖 Lire 20 pages", "weight": 2, "stat": "Connaissances"},
+    {"id": "clean", "name": "🛠️ Rangement / Autonomie", "weight": 1, "stat": "Autonomie"},
 ]
 
 for task in daily_tasks:
     c1, c2 = st.columns([3, 1])
-    is_done = task['id'] in st.session_state.completed_quests
+    is_done = task['id'] in user["completed_today"]
     gain_xp = BASE_XP * task['weight']
     
     status_icon = "✅" if is_done else "🔳"
@@ -90,7 +99,7 @@ for task in daily_tasks:
         if c2.button("Valider", key=task['id'], use_container_width=True):
             user['xp'] += gain_xp
             user['stats'][task['stat']] += task['weight']
-            st.session_state.completed_quests.append(task['id'])
+            user["completed_today"].append(task['id'])
             
             while user['xp'] >= get_xp_needed(user['level']):
                 user['xp'] -= get_xp_needed(user['level'])
@@ -103,10 +112,10 @@ for task in daily_tasks:
         c2.button("Fait", key=task['id'], disabled=True, use_container_width=True)
 
 with st.sidebar:
-    st.header("⚙️ Système")
-    if st.button("🔄 Nouvelle Journée"):
-        st.session_state.completed_quests = []
+    st.write("Dernier Reset :", user["last_reset"])
+    if st.button("🔄 Reset Manuel"):
+        user["completed_today"] = []
+        save_data(user)
         st.rerun()
     st.divider()
-    st.write("Fichier JSON actuel :")
     st.json(user)
