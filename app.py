@@ -19,11 +19,11 @@ def load_data():
         if response.data and len(response.data) > 0:
             raw_data = response.data[0]['data']
             data = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
-            # Initialisation si nouvelles clés manquantes
+            # Initialisations de sécurité
             if "stats" not in data:
                 data["stats"] = {"Physique": 0, "Connaissances": 0, "Autonomie": 0, "Mental": 0}
-            if "last_reset" not in data:
-                data["last_reset"] = datetime.now().strftime("%Y-%m-%d")
+            if "history" not in data:
+                data["history"] = []
             if "completed_today" not in data:
                 data["completed_today"] = []
             return data
@@ -31,21 +31,15 @@ def load_data():
     return {
         "level": 1, "xp": 0, 
         "stats": {"Physique": 0, "Connaissances": 0, "Autonomie": 0, "Mental": 0},
-        "last_reset": datetime.now().strftime("%Y-%m-%d"),
-        "completed_today": []
+        "completed_today": [],
+        "history": []
     }
 
 def save_data(data):
     supabase.table('profiles').upsert({"user_id": MY_ID, "data": data}).execute()
 
-# --- 3. GESTION DU TEMPS (RESET AUTO) ---
+# --- 3. CHARGEMENT ---
 user = load_data()
-today = datetime.now().strftime("%Y-%m-%d")
-
-if user["last_reset"] != today:
-    user["completed_today"] = []
-    user["last_reset"] = today
-    save_data(user)
 
 # --- 4. CALCULS ---
 def get_xp_needed(lvl):
@@ -62,45 +56,60 @@ xp_target = get_xp_needed(user['level'])
 
 # HUD
 col1, col2 = st.columns(2)
-col1.metric("NIVEAU", user['level'])
+col1.metric("NIVEAU GLOBAL", user['level'])
 col2.metric("XP", f"{user['xp']} / {xp_target}")
 st.progress(min(user['xp'] / xp_target, 1.0))
 
-# STATS
+# STATS (Noms Complets)
 st.write("### 📊 Caractéristiques")
-s_col = st.columns(4)
-stats_keys = list(user['stats'].keys())
-for i in range(4):
-    s_col[i].metric(stats_keys[i][:3], user['stats'][stats_keys[i]])
+s_col1, s_col2, s_col3, s_col4 = st.columns(4)
+s_col1.metric("Physique", user['stats']['Physique'])
+s_col2.metric("Connaissances", user['stats']['Connaissances'])
+s_col3.metric("Autonomie", user['stats']['Autonomie'])
+s_col4.metric("Mental", user['stats']['Mental'])
 
 st.divider()
 
-# --- SYSTÈME DE QUÊTES (4 SLOTS) ---
+# --- SYSTÈME DE QUÊTES ---
 st.subheader("📋 Objectifs du Jour")
 
 BASE_XP = 150 
 daily_tasks = [
-    {"id": "pushups", "name": "💪 Faire 100 pompes", "weight": 3, "stat": "Physique"}, 
-    {"id": "abs", "name": "🧘 Faire 100 abdos", "weight": 2, "stat": "Physique"},     
-    {"id": "read", "name": "📖 Lire 20 pages", "weight": 2, "stat": "Connaissances"},
-    {"id": "clean", "name": "🛠️ Rangement / Autonomie", "weight": 1, "stat": "Autonomie"},
+    {"id": "pushups", "name": "💪 Faire 100 pompes", "stat": "Physique"}, 
+    {"id": "abs", "name": "🧘 Faire 100 abdos", "stat": "Physique"},     
+    {"id": "read", "name": "📖 Lire 20 pages", "stat": "Connaissances"},
+    {"id": "clean", "name": "🛠️ Rangement / Autonomie", "stat": "Autonomie"},
 ]
 
 for task in daily_tasks:
-    c1, c2 = st.columns([3, 1])
+    c1, c2, c3 = st.columns([2, 1, 1])
     is_done = task['id'] in user["completed_today"]
-    gain_xp = BASE_XP * task['weight']
     
+    # Nom de la tâche
     status_icon = "✅" if is_done else "🔳"
     c1.write(f"{status_icon} **{task['name']}**")
-    c1.caption(f"+{gain_xp} XP | +{task['weight']} {task['stat']}")
     
     if not is_done:
-        if c2.button("Valider", key=task['id'], use_container_width=True):
+        # Choix de la pondération (Poids)
+        weight = c2.select_slider("Poids", options=[1, 2, 3], key=f"w_{task['id']}")
+        
+        if c3.button("Valider", key=task['id'], use_container_width=True):
+            gain_xp = BASE_XP * weight
+            # Mise à jour profil
             user['xp'] += gain_xp
-            user['stats'][task['stat']] += task['weight']
+            user['stats'][task['stat']] += weight
             user["completed_today"].append(task['id'])
             
+            # Enregistrement Journal (Date et Heure)
+            log_entry = {
+                "date": datetime.now().strftime("%d/%m/%Y"),
+                "heure": datetime.now().strftime("%H:%M"),
+                "task": task['name'],
+                "weight": weight
+            }
+            user["history"].append(log_entry)
+            
+            # Passage de niveau
             while user['xp'] >= get_xp_needed(user['level']):
                 user['xp'] -= get_xp_needed(user['level'])
                 user['level'] += 1
@@ -109,11 +118,21 @@ for task in daily_tasks:
             save_data(user)
             st.rerun()
     else:
-        c2.button("Fait", key=task['id'], disabled=True, use_container_width=True)
+        c2.write("---")
+        c3.button("Fait", key=task['id'], disabled=True, use_container_width=True)
+
+# --- 6. JOURNAL D'ÉPOPÉE ---
+st.divider()
+with st.expander("📖 Journal d'Épopée (Historique)"):
+    if user["history"]:
+        for entry in reversed(user["history"]):
+            st.write(f"📅 **{entry['date']}** à {entry['heure']} — {entry['task']} (Poids {entry['weight']})")
+    else:
+        st.write("Aucun exploit enregistré pour le moment.")
 
 with st.sidebar:
-    st.write("Dernier Reset :", user["last_reset"])
-    if st.button("🔄 Reset Manuel"):
+    st.header("⚙️ Système")
+    if st.button("🔄 Nouvelle Journée"):
         user["completed_today"] = []
         save_data(user)
         st.rerun()
