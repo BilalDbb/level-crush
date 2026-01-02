@@ -18,7 +18,6 @@ def load_data():
         if response.data and len(response.data) > 0:
             raw_data = response.data[0]['data']
             data = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
-            # Initialisation des stats si elles n'existent pas encore dans ta base
             if "stats" not in data:
                 data["stats"] = {"Physique": 0, "Connaissances": 0, "Autonomie": 0, "Mental": 0}
             return data
@@ -46,7 +45,7 @@ def get_xp_needed(lvl):
 
 # --- 5. INTERFACE ---
 st.set_page_config(page_title="LEVEL CRUSH", page_icon="⚡")
-st.title("⚡ LEVEL CRUSH : SYSTÈME DE STATS")
+st.title("⚡ LEVEL CRUSH")
 
 xp_target = get_xp_needed(user['level'])
 
@@ -70,11 +69,12 @@ st.divider()
 st.subheader("📋 Objectifs du Jour")
 
 BASE_XP = 150 
-# Ici, on lie chaque tâche à une caractéristique spécifique
 daily_tasks = [
     {"id": "pushups", "name": "💪 Faire 100 pompes", "weight": 3, "stat": "Physique"}, 
     {"id": "abs", "name": "🧘 Faire 100 abdos", "weight": 2, "stat": "Physique"},     
-    {"id": "read", "name": "📖 Lire 20 pages", "weight": 1, "stat": "Connaissances"},      
+    {"id": "read", "name": "📖 Lire 20 pages", "weight": 1, "stat": "Connaissances"},
+    {"id": "admin", "name": "🛠️ Gestion administrative / Rangement", "weight": 2, "stat": "Autonomie"},
+    {"id": "medit", "name": "🧘 10min Discipline / Méditation", "weight": 1, "stat": "Mental"},
 ]
 
 for task in daily_tasks:
@@ -84,18 +84,14 @@ for task in daily_tasks:
     
     status_icon = "✅" if is_done else "🔳"
     c1.write(f"{status_icon} **{task['name']}**")
-    c1.caption(f"Gain : +{gain_xp} XP | Stat : +{task['weight']} {task['stat']}")
+    c1.caption(f"+{gain_xp} XP | +{task['weight']} {task['stat']}")
     
     if not is_done:
         if c2.button("Valider", key=task['id'], use_container_width=True):
-            # 1. Augmenter l'XP globale
             user['xp'] += gain_xp
-            # 2. Augmenter la Statistique associée
             user['stats'][task['stat']] += task['weight']
-            
             st.session_state.completed_quests.append(task['id'])
             
-            # Boucle de niveau
             while user['xp'] >= get_xp_needed(user['level']):
                 user['xp'] -= get_xp_needed(user['level'])
                 user['level'] += 1
@@ -104,4 +100,13 @@ for task in daily_tasks:
             save_data(user)
             st.rerun()
     else:
-        c2.button("Fait", key=task['
+        c2.button("Fait", key=task['id'], disabled=True, use_container_width=True)
+
+with st.sidebar:
+    st.header("⚙️ Système")
+    if st.button("🔄 Nouvelle Journée"):
+        st.session_state.completed_quests = []
+        st.rerun()
+    st.divider()
+    st.write("Fichier JSON actuel :")
+    st.json(user)
