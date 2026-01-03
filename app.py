@@ -69,20 +69,17 @@ u = load_data()
 def process_xp_change(amount, task_name=None, status="fait"):
     u['xp'] += amount
     log_msg = f"{status.upper()} : {task_name if task_name else 'Action'} ({amount:+d} XP)"
-    
     if status == "fait" and task_name in u["task_stat_links"]:
         stat_name = u["task_stat_links"][task_name]
         gain_stat = u["task_diffs"].get(task_name, 1)
         u["stats"][stat_name] = round(u["stats"][stat_name] + gain_stat, 1)
         log_msg += f" | +{gain_stat} {stat_name}"
-
     while True:
         req = get_xp_required(u['level'])
         if u['xp'] >= req and u['level'] < 100: u['xp'] -= req; u['level'] += 1; st.toast("🌟 LEVEL UP !")
         else: break
     if u['mode'] == "Exalté":
         while u['xp'] < 0 and u['level'] > 1: u['level'] -= 1; u['xp'] += get_xp_required(u['level']); st.toast("📉 LEVEL DOWN...")
-    
     u["xp_history"].append({"date": u["internal_date"], "xp_cumul": get_total_cumulated_xp(u['level'], u['xp']), "status": status})
     u["combat_log"].insert(0, f"[{u['internal_date']}] {log_msg}")
     u["combat_log"] = u["combat_log"][:5]
@@ -106,11 +103,11 @@ with tabs[0]:
     st.divider()
     idx = 0
     for q_p in ["Quotidiennes", "Hebdomadaires", "Mensuelles", "Trimestrielles", "Annuelles"]:
-        tasks = u["task_lists"].get(q_p, [])
-        if tasks:
+        tsks = u["task_lists"].get(q_p, [])
+        if tsks:
             max_p = {"Quotidiennes":3, "Hebdomadaires":5, "Mensuelles":7, "Trimestrielles":9, "Annuelles":11}[q_p]
-            with st.expander(f"{q_p} ({len(tasks)}/{get_capacity_for_period(u['level'], q_p)})", expanded=True):
-                for t in tasks:
+            with st.expander(f"{q_p} ({len(tsks)}/{get_capacity_for_period(u['level'], q_p)})", expanded=True):
+                for t in tsks:
                     done = t in u["completed_quests"]
                     c = st.columns([2, 1, 0.5, 0.5] if u['mode'] == "Exalté" else [2, 1, 1])
                     c[0].markdown(f"{'✅' if done else '🔳'} {t} <small style='color:#666'>({u['task_stat_links'].get(t, 'N/A')})</small>", unsafe_allow_html=True)
@@ -134,9 +131,9 @@ with tabs[1]:
             df = pd.DataFrame(u["xp_history"]); df['date'] = pd.to_datetime(df['date'])
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=df['date'], y=df['xp_cumul'], mode='lines', line=dict(color='#00FFCC', width=2), name="Courbe XP"))
-            for status, color, label in [('fait', '#00FFCC', 'Succès'), ('rouge', 'red', 'Échec/Saut')]:
-                sub = df[df['status'] == status]
-                if not sub.empty: fig.add_trace(go.Scatter(x=sub['date'], y=sub['xp_cumul'], mode='markers', marker=dict(color=color, size=8), name=label))
+            for s, col, lab in [('fait', '#00FFCC', 'Succès'), ('rouge', 'red', 'Échec/Saut')]:
+                sub = df[df['status'] == s]
+                if not sub.empty: fig.add_trace(go.Scatter(x=sub['date'], y=sub['xp_cumul'], mode='markers', marker=dict(color=col, size=8), name=lab))
             fig.update_layout(template="plotly_dark", height=400, margin=dict(l=10, r=10, t=10, b=10), showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
             st.plotly_chart(fig, use_container_width=True)
     with c2:
@@ -160,22 +157,44 @@ with tabs[2]:
 
 with tabs[3]:
     st.subheader("⚙️ Configuration")
-    new_m = st.radio("Mode de Jeu", ["Séide", "Exalté"], index=["Séide", "Exalté"].index(u["mode"]), help="Séide: Pas de pénalité. Exalté: Perte d'XP/Niveau possible.")
-    if new_m != u["mode"]: u["mode"] = new_m; save_data(u); st.rerun()
+    nm = st.radio("Mode de Jeu", ["Séide", "Exalté"], index=["Séide", "Exalté"].index(u["mode"]), help="Séide: Pas de pénalité. Exalté: Perte d'XP possible.")
+    if nm != u["mode"]: u["mode"] = nm; save_data(u); st.rerun()
     st.divider()
     cp, ct, cs, cb = st.columns([1, 1.5, 1, 0.5])
     sel_p = cp.selectbox("Période", ["Quotidiennes", "Hebdomadaires", "Mensuelles", "Trimestrielles", "Annuelles"])
     t_add = ct.text_input("Nouvelle tâche")
-    stat_link = cs.selectbox("Stat", ["Physique", "Connaissances", "Autonomie", "Mental"])
+    st_link = cs.selectbox("Stat", ["Physique", "Connaissances", "Autonomie", "Mental"])
     if cb.button("➕"):
         cap = get_capacity_for_period(u['level'], sel_p)
         if len(u["task_lists"].get(sel_p, [])) >= cap: st.error(f"Limite atteinte pour {sel_p} ({cap} slots).")
         elif t_add and t_add not in u["task_stat_links"]:
-            u["task_lists"][sel_p].append(t_add); u["task_stat_links"][t_add] = stat_link; save_data(u); st.rerun()
+            u["task_lists"][sel_p].append(t_add); u["task_stat_links"][t_add] = st_link; save_data(u); st.rerun()
     for p, tsks in u["task_lists"].items():
         if tsks:
             st.write(f"**{p}**")
             for i, t in enumerate(tsks):
                 cx1, cx2, cx3 = st.columns([2, 1, 1])
                 nn = cx1.text_input("Nom", t, key=f"n_{p}_{i}", label_visibility="collapsed")
-                ns = cx2.selectbox("Stat", ["Physique", "Connaissances", "Autonomie", "Mental"], index=["Physique", "Connaissances", "Autonomie", "Mental"].index(u['task_stat_links'].get(t, "Physique")), key=f"s_{p}_{i}", label
+                ns = cx2.selectbox("Stat", ["Physique", "Connaissances", "Autonomie", "Mental"], index=["Physique", "Connaissances", "Autonomie", "Mental"].index(u['task_stat_links'].get(t, "Physique")), key=f"s_{p}_{i}", label_visibility="collapsed")
+                c_bt = cx3.columns(2)
+                if c_bt[0].button("💾", key=f"sv_{p}_{i}"):
+                    if nn != t:
+                        u["task_lists"][p][i] = nn
+                        u["task_stat_links"][nn] = u["task_stat_links"].pop(t)
+                        if t in u["task_diffs"]: u["task_diffs"][nn] = u["task_diffs"].pop(t)
+                    u["task_stat_links"][nn] = ns; save_data(u); st.rerun()
+                if c_bt[1].button("❌", key=f"dl_{p}_{i}"): u["task_lists"][p].remove(t); u["task_stat_links"].pop(t, None); save_data(u); st.rerun()
+
+with st.sidebar:
+    st.header("⏳ Temps")
+    if st.button("⏭️ SAUTER UN JOUR"):
+        if u['mode'] == "Exalté": process_xp_change(-(len(u["task_lists"].get("Quotidiennes", [])) * 100), "Saut de jour", "rouge")
+        else: process_xp_change(0, "Saut de jour", "rouge")
+        u["internal_date"] = (datetime.strptime(u["internal_date"], "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+        u["completed_quests"] = [q for q in u["completed_quests"] if q not in u["task_lists"].get("Quotidiennes", [])]; save_data(u); st.rerun()
+    for p in ["Quotidiennes", "Hebdomadaires", "Mensuelles", "Trimestrielles", "Annuelles"]:
+        if st.button(f"Reset {p}"):
+            if p == "Quotidiennes": u["internal_date"] = (datetime.strptime(u["internal_date"], "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+            u["completed_quests"] = [q for q in u["completed_quests"] if q not in u["task_lists"].get(p, [])]; save_data(u); st.rerun()
+    st.divider()
+    if st.button("💀 HARD RESET"): save_data(get_default_data()); st.rerun()
