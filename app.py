@@ -30,7 +30,7 @@ def get_capacity_for_period(lvl, period):
     return 1
 
 # --- 3. CONFIGURATION DES TITRES ---
-TITLES_DATA = [(1, "Starter", "#DCDDDF"), (3, "Néophyte", "#3498DB"), (6, "Aspirant", "#2ECC71"), (10, "Soldat de Plomb", "#E67E22"), (14, "Gardien de Fer", "#95A5A6"), (19, "Traqueur Silencieux", "#9B59B6"), (24, "Vanguard", "#1ABC9C"), (30, "Chevalier d'Acier", "#BDC3C7"), (36, "Briseur de Chaînes", "#F39C12"), (43, "Architecte du Destin", "#34495E"), (50, "Légat du Système", "#16A085"), (58, "Commandeur", "#27AE60"), (66, "Seigneur de Guerre", "#C0392B"), (75, "Entité Transcendante", "#F1C40F"), (84, "Demi-Dieu", "#E74C3C"), (93, "Souverain", "#8E44AD"), (100, "LEVEL CRUSHER", "#000000")]
+TITLES_DATA = [(1, "Starter", "#DCDDDF"), (3, "Néophyte", "#3498DB"), (6, "Aspirant", "#2ECC71"), (10, "Soldat de Plomb", "#E67E22"), (14, "Gardien de Fer", "#95A5A6"), (19, "Traqueur Silencieux", "#9B59B6"), (24, "Vanguard", "#2980B9"), (30, "Chevalier d'Acier", "#BDC3C7"), (36, "Briseur de Chaînes", "#F39C12"), (43, "Architecte du Destin", "#34495E"), (50, "Légat du Système", "#16A085"), (58, "Commandeur", "#27AE60"), (66, "Seigneur de Guerre", "#C0392B"), (75, "Entité Transcendante", "#F1C40F"), (84, "Demi-Dieu", "#E74C3C"), (93, "Souverain", "#8E44AD"), (100, "LEVEL CRUSHER", "#000000")]
 
 def get_current_title_info(lvl):
     current = TITLES_DATA[0]
@@ -104,7 +104,11 @@ with tabs[0]:
                     c = st.columns([2, 1, 0.5, 0.5] if u['mode'] == "Exalté" else [2, 1, 1])
                     c[0].markdown(f"{'✅' if done else '🔳'} {t} <small style='color:#666'>({u['task_stat_links'].get(t, 'N/A')})</small>", unsafe_allow_html=True)
                     if not done:
-                        d = c[1].select_slider("Poids", options=list(range(1, max_p+1)), value=u["task_diffs"].get(t, 1), key=f"s_{idx}", label_visibility="collapsed")
+                        # SECURITE : Recalage du poids si hors limites Catégorie
+                        current_weight = u["task_diffs"].get(t, 1)
+                        if current_weight > max_p: current_weight = max_p
+                        
+                        d = c[1].select_slider("Poids", options=list(range(1, max_p+1)), value=current_weight, key=f"s_{idx}", label_visibility="collapsed")
                         u["task_diffs"][t] = d
                         if c[2].button("✔️", key=f"v_{idx}"): process_xp_change(100 * d, t, "fait"); u["completed_quests"].append(t); save_data(u); st.rerun()
                         if u['mode'] == "Exalté" and len(c) > 3:
@@ -181,7 +185,7 @@ with st.sidebar:
         if u['mode'] == "Exalté": process_xp_change(-(len(u["task_lists"].get("Quotidiennes", [])) * 100), "Saut de jour", "rouge")
         u["internal_date"] = (datetime.strptime(u["internal_date"], "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
         u["completed_quests"] = [q for q in u["completed_quests"] if q not in u["task_lists"].get("Quotidiennes", [])]; save_data(u); st.rerun()
-    for p in u["task_lists"].keys():
+    for p in ["Quotidiennes", "Hebdomadaires", "Mensuelles", "Trimestrielles", "Annuelles"]:
         if st.button(f"Reset {p}"):
             if p == "Quotidiennes": u["internal_date"] = (datetime.strptime(u["internal_date"], "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
             u["completed_quests"] = [q for q in u["completed_quests"] if q not in u["task_lists"].get(p, [])]; save_data(u); st.rerun()
