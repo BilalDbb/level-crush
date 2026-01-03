@@ -12,7 +12,7 @@ except Exception as e:
     st.error(f"Erreur Cloud : {e}")
     st.stop()
 
-# --- 2. LOGIQUE XP ---
+# --- 2. LOGIQUE XP & CAPACITÉ ---
 def get_xp_required(lvl):
     next_lvl = lvl + 1
     if lvl < 5: return int(200 * (next_lvl**1.2))
@@ -24,6 +24,10 @@ def get_total_cumulated_xp(lvl, current_xp):
     for l in range(1, lvl):
         total += get_xp_required(l)
     return total + current_xp
+
+def get_task_capacity(lvl):
+    """Calcule le nombre max de tâches : 4 base + 5 (périodes) + 1 tous les 20 niveaux"""
+    return 4 + 5 + (lvl // 20)
 
 # --- 3. GESTION DES DONNÉES ---
 MY_ID = "shadow_monarch_01" 
@@ -68,14 +72,13 @@ def process_xp_change(amount, status="fait"):
         while u['xp'] < 0 and u['level'] > 1:
             u['level'] -= 1; u['xp'] += get_xp_required(u['level']); st.toast("📉 LEVEL DOWN...")
     if u['xp'] < 0: u['xp'] = 0
-    # Enregistrement du point avec la date interne
     u["xp_history"].append({
         "date": u["internal_date"],
         "xp_cumul": get_total_cumulated_xp(u['level'], u['xp']),
         "status": status
     })
 
-# --- 4. INTERFACE ---
+# --- 4. CONFIGURATION TITRES ---
 TITLES = {1: "Rang E", 3: "Néophyte", 6: "Aspirant", 10: "Soldat de Plomb", 14: "Gardien de Fer", 19: "Traqueur Silencieux", 24: "Vanguard", 30: "Chevalier d'Acier", 36: "Briseur de Chaînes", 43: "Architecte du Destin", 50: "Légat du Système", 58: "Commandeur", 66: "Seigneur de Guerre", 75: "Entité Transcendante", 84: "Demi-Dieu", 93: "Souverain", 100: "LEVEL CRUSHER"}
 
 st.set_page_config(page_title="LEVEL CRUSH", layout="wide")
@@ -91,7 +94,6 @@ with tabs[0]:
     st.divider()
     idx = 0
     for q_p in ["Quotidiennes", "Hebdomadaires", "Mensuelles", "Trimestrielles", "Annuelles"]:
-        m_d = {"Quotidiennes":3, "Hebdomadaires":5, "Mensuelles":7, "Trimestrielles":9, "Annuelles":11}[q_p]
         tasks = u["task_lists"].get(q_p, [])
         if tasks:
             with st.expander(f"{q_p}", expanded=True):
@@ -100,6 +102,7 @@ with tabs[0]:
                     c = st.columns([2, 1, 0.5, 0.5] if u['mode'] == "Exalté" else [2, 1, 1])
                     c[0].write(f"{'✅' if done else '🔳'} {task}")
                     if not done:
+                        m_d = {"Quotidiennes":3, "Hebdomadaires":5, "Mensuelles":7, "Trimestrielles":9, "Annuelles":11}[q_p]
                         val_diff = u["task_diffs"].get(task, 1)
                         diff = c[1].select_slider("Poids", options=list(range(1, m_d+1)), value=val_diff, key=f"s_{idx}", label_visibility="collapsed")
                         u["task_diffs"][task] = diff
@@ -117,47 +120,67 @@ with tabs[0]:
 with tabs[1]:
     c1, c2 = st.columns([1.5, 1])
     with c1:
-        st.subheader("📈 Progression")
+        st.markdown("<h3 style='text-align: center;'>📈 Progression</h3>", unsafe_allow_html=True)
         if u["xp_history"]:
             df = pd.DataFrame(u["xp_history"])
             df['date'] = pd.to_datetime(df['date'])
             fig = go.Figure()
-            # Ligne de base
-            fig.add_trace(go.Scatter(x=df['date'], y=df['xp_cumul'], mode='lines', line=dict(color='#00FFCC', width=2), name="Courbe XP"))
-            # Points avec légende couleur
+            fig.add_trace(go.Scatter(x=df['date'], y=df['xp_cumul'], mode='lines', line=dict(color='#00FFCC', width=2), name="XP Cumulée"))
             for status, color, label in [('fait', '#00FFCC', 'Succès'), ('orange', 'orange', 'Partiel'), ('rouge', 'red', 'Échec')]:
                 sub = df[df['status'] == status]
                 if not sub.empty:
                     fig.add_trace(go.Scatter(x=sub['date'], y=sub['xp_cumul'], mode='markers', marker=dict(color=color, size=8), name=label))
-            
-            fig.update_layout(template="plotly_dark", height=450, showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+            fig.update_layout(template="plotly_dark", height=400, showlegend=True, margin=dict(l=10, r=10, t=10, b=10), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
             st.plotly_chart(fig, use_container_width=True)
-        else: st.info("Simulez une progression pour voir le graphique.")
+        else: st.info("Aucune donnée.")
     with c2:
-        st.subheader("🕸️ Profil de Puissance")
+        st.markdown("<h3 style='text-align: center;'>🕸️ Profil de Puissance</h3>", unsafe_allow_html=True)
         fig_r = go.Figure(data=go.Scatterpolar(r=list(u['stats'].values()), theta=list(u['stats'].keys()), fill='toself', line_color='#00FFCC'))
-        fig_r.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, max(u['stats'].values())+10])), template="plotly_dark", height=450)
+        fig_r.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, max(u['stats'].values())+10])), template="plotly_dark", height=400, margin=dict(l=40, r=40, t=10, b=10))
         st.plotly_chart(fig_r, use_container_width=True)
 
 # --- TAB 3 : TITRES ---
 with tabs[2]:
+    st.subheader("🎖️ Arbre des Titres")
     cols = st.columns(4)
     for i, (l_req, title) in enumerate(TITLES.items()):
         unlocked = u['level'] >= l_req
         with cols[i % 4]:
             st.markdown(f"<div style='background:{'#1E1E1E' if unlocked else '#0A0A0A'}; border:2px solid {'#00FFCC' if unlocked else '#333'}; padding:15px; border-radius:10px; text-align:center; margin-bottom:15px;'><span style='color:{'#00FFCC' if unlocked else '#444'}; font-size:0.8em;'>Niveau {l_req}</span><br><b style='color:{'white' if unlocked else '#444'};'>{title if unlocked else '???'}</b></div>", unsafe_allow_html=True)
 
+# --- TAB 4 : SYSTÈME ---
+with tabs[3]:
+    st.subheader("🧩 Architecture du Système")
+    st.markdown(f"""
+    **📏 Capacité de Tâches**
+    Votre limite actuelle est de **{get_task_capacity(u['level'])}** emplacements.
+    - 4 de base + 5 (1 par période).
+    - +1 emplacement tous les **20 niveaux**.
+    """)
+
 # --- TAB 5 : CONFIGURATION ---
 with tabs[4]:
     new_m = st.radio("Difficulté", ["Séide", "Exalté"], index=["Séide", "Exalté"].index(u["mode"]))
     if new_m != u["mode"]: u["mode"] = new_m; save_data(u); st.rerun()
     st.divider()
+    
+    total_tasks = sum(len(v) for v in u["task_lists"].values())
+    max_cap = get_task_capacity(u['level'])
+    st.subheader(f"⚙️ Tâches ({total_tasks} / {max_cap})")
+    
     cp, ct, cb = st.columns([1, 2, 1])
     sel_p = cp.selectbox("Période", ["Quotidiennes", "Hebdomadaires", "Mensuelles", "Trimestrielles", "Annuelles"])
     t_add = ct.text_input("Tâche")
+    
     if cb.button("Ajouter"):
-        all_t = [t for sub in u["task_lists"].values() for t in sub]
-        if t_add not in all_t and t_add: u["task_lists"][sel_p].append(t_add); save_data(u); st.rerun()
+        if total_tasks >= max_cap:
+            st.error(f"Limite atteinte ({max_cap}). Atteignez le prochain palier (multiple de 20) !")
+        else:
+            all_t = [t for sub in u["task_lists"].values() for t in sub]
+            if t_add not in all_t and t_add:
+                u["task_lists"][sel_p].append(t_add)
+                save_data(u); st.rerun()
+
     for p in ["Quotidiennes", "Hebdomadaires", "Mensuelles", "Trimestrielles", "Annuelles"]:
         tasks = u["task_lists"].get(p, [])
         if tasks:
@@ -171,7 +194,7 @@ with tabs[4]:
 # --- SIDEBAR (CONTRÔLE) ---
 with st.sidebar:
     st.header("⏳ Temps")
-    st.info(f"Date Système : {u['internal_date']}")
+    st.info(f"Date : {u['internal_date']}")
     if st.button("⏭️ SAUTER UN JOUR"):
         if u['mode'] == "Exalté":
             d_count = len(u["task_lists"].get("Quotidiennes", []))
