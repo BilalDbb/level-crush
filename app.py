@@ -93,7 +93,7 @@ def process_xp_change(amount, status="fait"):
 st.set_page_config(page_title="LEVEL CRUSH", layout="wide")
 
 # HEADER AVEC BADGE DYNAMIQUE
-_, title_name, title_color = get_current_title_info(u['level'])
+curr_l_req, title_name, title_color = get_current_title_info(u['level'])
 st.markdown(f"""
     <div style="text-align:center; padding:10px;">
         <span style="color:white; font-size:1.1em; vertical-align:middle;">NIV.{u['level']}</span>
@@ -113,18 +113,18 @@ with tabs[0]:
     st.write(f"XP : **{u['xp']} / {req}**")
     
     with st.expander("📜 Registre des Rangs", expanded=False):
-        # Timeline Horizontale avec injection HTML propre
-        timeline_items = ""
+        # Construction propre de la timeline pour éviter l'affichage de texte brut
+        items_html = ""
         for l_req, t_name, t_color in TITLES_DATA:
             is_unlocked = u['level'] >= l_req
-            is_current = get_current_title_info(u['level'])[0] == l_req
+            is_current = curr_l_req == l_req
             disp_name = t_name if is_unlocked else "???"
             dot_color = t_color if is_unlocked else "#333"
             opacity = "1" if is_unlocked else "0.4"
             pulse_class = "pulse-active" if is_current else ""
             border_style = f"border: 2px solid {'white' if is_current else 'transparent'};"
             
-            timeline_items += f"""
+            items_html += f"""
                 <div style="min-width: 90px; text-align: center; opacity: {opacity}; margin-right: 15px;">
                     <div class="dot {pulse_class}" style="width: 14px; height: 14px; background: {dot_color}; border-radius: 50%; margin: 0 auto; {border_style}"></div>
                     <p style="font-size: 0.65em; color: {dot_color}; margin-top: 8px; font-weight: bold; white-space: nowrap;">{disp_name}</p>
@@ -132,6 +132,7 @@ with tabs[0]:
                 </div>
             """
         
+        # Injection finale d'un bloc HTML unique
         st.markdown(f"""
             <style>
             @keyframes pulse-anim {{
@@ -140,18 +141,18 @@ with tabs[0]:
                 100% {{ box-shadow: 0 0 0 0 {title_color}00; }}
             }}
             .pulse-active {{ animation: pulse-anim 2s infinite; }}
-            .scroll-container {{
+            .scroll-wrapper {{
                 display: flex; 
                 overflow-x: auto; 
-                padding: 15px 5px; 
+                padding: 20px 5px; 
                 scroll-behavior: smooth;
                 -webkit-overflow-scrolling: touch;
             }}
-            .scroll-container::-webkit-scrollbar {{ height: 4px; }}
-            .scroll-container::-webkit-scrollbar-thumb {{ background: #333; border-radius: 10px; }}
+            .scroll-wrapper::-webkit-scrollbar {{ height: 5px; }}
+            .scroll-wrapper::-webkit-scrollbar-thumb {{ background: #444; border-radius: 10px; }}
             </style>
-            <div class="scroll-container">
-                {timeline_items}
+            <div class="scroll-wrapper">
+                {items_html}
             </div>
         """, unsafe_allow_html=True)
 
