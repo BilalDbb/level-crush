@@ -30,13 +30,22 @@ def get_capacity_for_period(lvl, period):
     return 1
 
 # --- 3. CONFIGURATION DES TITRES ---
-TITLES_DATA = [(1, "Starter", "#DCDDDF"), (3, "Néophyte", "#3498DB"), (6, "Aspirant", "#2ECC71"), (10, "Soldat de Plomb", "#E67E22"), (14, "Gardien de Fer", "#95A5A6"), (19, "Traqueur Silencieux", "#9B59B6"), (24, "Vanguard", "#2980B9"), (30, "Chevalier d'Acier", "#BDC3C7"), (36, "Briseur de Chaînes", "#F39C12"), (43, "Architecte du Destin", "#34495E"), (50, "Légat du Système", "#16A085"), (58, "Commandeur", "#27AE60"), (66, "Seigneur de Guerre", "#C0392B"), (75, "Entité Transcendante", "#F1C40F"), (84, "Demi-Dieu", "#E74C3C"), (93, "Souverain", "#8E44AD"), (100, "LEVEL CRUSHER", "#000000")]
+TITLES_DATA = [(1, "Starter", "#DCDDDF"), (3, "Néophyte", "#3498DB"), (6, "Aspirant", "#2ECC71"), (10, "Soldat de Plomb", "#E67E22"), (14, "Gardien de Fer", "#95A5A6"), (19, "Traqueur Silencieux", "#9B59B6"), (24, "Vanguard", "#1ABC9C"), (30, "Chevalier d'Acier", "#BDC3C7"), (36, "Briseur de Chaînes", "#F39C12"), (43, "Architecte du Destin", "#34495E"), (50, "Légat du Système", "#16A085"), (58, "Commandeur", "#27AE60"), (66, "Seigneur de Guerre", "#C0392B"), (75, "Entité Transcendante", "#F1C40F"), (84, "Demi-Dieu", "#E74C3C"), (93, "Souverain", "#8E44AD"), (100, "LEVEL CRUSHER", "#000000")]
 
 def get_current_title_info(lvl):
     current = TITLES_DATA[0]
     for l_req, name, color in TITLES_DATA:
         if lvl >= l_req: current = (l_req, name, color)
     return current
+
+def get_default_data():
+    return {
+        "level": 1, "xp": 0, "mode": "Séide", 
+        "stats": {"Physique": 0, "Connaissances": 0, "Autonomie": 0, "Mental": 0}, 
+        "completed_quests": [], 
+        "task_lists": {"Quotidiennes": [], "Hebdomadaires": [], "Mensuelles": [], "Trimestrielles": [], "Annuelles": []}, 
+        "task_diffs": {}, "task_stat_links": {}, "combat_log": [], "xp_history": [], "internal_date": "2026-01-03"
+    }
 
 # --- 4. GESTION DES DONNÉES ---
 MY_ID = "shadow_monarch_01" 
@@ -50,7 +59,7 @@ def load_data():
                 if k not in d: d[k] = [] if k=="combat_log" else {}
             return d
     except: pass
-    return {"level": 1, "xp": 0, "mode": "Séide", "stats": {"Physique": 10, "Connaissances": 10, "Autonomie": 10, "Mental": 10}, "completed_quests": [], "task_lists": {"Quotidiennes": [], "Hebdomadaires": [], "Mensuelles": [], "Trimestrielles": [], "Annuelles": []}, "task_diffs": {}, "task_stat_links": {}, "combat_log": [], "xp_history": [], "internal_date": "2026-01-03"}
+    return get_default_data()
 
 def save_data(data):
     supabase.table('profiles').upsert({"user_id": MY_ID, "data": data}).execute()
@@ -60,18 +69,21 @@ u = load_data()
 def process_xp_change(amount, task_name=None, status="fait"):
     u['xp'] += amount
     log_msg = f"{status.upper()} : {task_name if task_name else 'Inconnu'} ({amount:+d} XP)"
+    
+    # Gain de stat : 1 point par pondération
     if status == "fait" and task_name in u["task_stat_links"]:
         stat_name = u["task_stat_links"][task_name]
-        poids = u["task_diffs"].get(task_name, 1)
-        gain_stat = round(poids * 0.1, 2)
-        u["stats"][stat_name] = round(u["stats"][stat_name] + gain_stat, 2)
+        gain_stat = u["task_diffs"].get(task_name, 1)
+        u["stats"][stat_name] = round(u["stats"][stat_name] + gain_stat, 1)
         log_msg += f" | +{gain_stat} {stat_name}"
+
     while True:
         req = get_xp_required(u['level'])
         if u['xp'] >= req and u['level'] < 100: u['xp'] -= req; u['level'] += 1; st.toast("🌟 LEVEL UP !")
         else: break
     if u['mode'] == "Exalté":
         while u['xp'] < 0 and u['level'] > 1: u['level'] -= 1; u['xp'] += get_xp_required(u['level']); st.toast("📉 LEVEL DOWN...")
+    
     u["xp_history"].append({"date": u["internal_date"], "xp_cumul": get_total_cumulated_xp(u['level'], u['xp']), "status": status})
     u["combat_log"].insert(0, f"[{u['internal_date']}] {log_msg}")
     u["combat_log"] = u["combat_log"][:5]
@@ -104,10 +116,8 @@ with tabs[0]:
                     c = st.columns([2, 1, 0.5, 0.5] if u['mode'] == "Exalté" else [2, 1, 1])
                     c[0].markdown(f"{'✅' if done else '🔳'} {t} <small style='color:#666'>({u['task_stat_links'].get(t, 'N/A')})</small>", unsafe_allow_html=True)
                     if not done:
-                        # SECURITE : Recalage du poids si hors limites Catégorie
                         current_weight = u["task_diffs"].get(t, 1)
                         if current_weight > max_p: current_weight = max_p
-                        
                         d = c[1].select_slider("Poids", options=list(range(1, max_p+1)), value=current_weight, key=f"s_{idx}", label_visibility="collapsed")
                         u["task_diffs"][t] = d
                         if c[2].button("✔️", key=f"v_{idx}"): process_xp_change(100 * d, t, "fait"); u["completed_quests"].append(t); save_data(u); st.rerun()
@@ -123,31 +133,36 @@ with tabs[1]:
         st.markdown("<h3 style='text-align:center;'>📈 Progression</h3>", unsafe_allow_html=True)
         if u["xp_history"]:
             df = pd.DataFrame(u["xp_history"]); df['date'] = pd.to_datetime(df['date'])
-            fig = go.Figure(go.Scatter(x=df['date'], y=df['xp_cumul'], mode='lines+markers', line=dict(color='#00FFCC'), name="XP"))
-            fig.update_layout(template="plotly_dark", height=400, margin=dict(l=10, r=10, t=10, b=10))
+            fig = go.Figure()
+            # Ligne de base
+            fig.add_trace(go.Scatter(x=df['date'], y=df['xp_cumul'], mode='lines', line=dict(color='#00FFCC', width=2), name="Courbe XP"))
+            # Points avec légende explicite
+            for status, color, label in [('fait', '#00FFCC', 'Succès'), ('rouge', 'red', 'Échec')]:
+                sub = df[df['status'] == status]
+                if not sub.empty:
+                    fig.add_trace(go.Scatter(x=sub['date'], y=sub['xp_cumul'], mode='markers', marker=dict(color=color, size=8), name=label))
+            fig.update_layout(template="plotly_dark", height=400, margin=dict(l=10, r=10, t=10, b=10), showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
             st.plotly_chart(fig, use_container_width=True)
     with c2:
         st.markdown("<h3 style='text-align:center;'>🕸️ Profil de Puissance</h3>", unsafe_allow_html=True)
-        fig_r = go.Figure(data=go.Scatterpolar(r=list(u['stats'].values()), theta=list(u['stats'].keys()), fill='toself', line_color='#00FFCC'))
-        fig_r.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, max(u['stats'].values())+5])), template="plotly_dark", height=400)
+        vals = list(u['stats'].values())
+        fig_r = go.Figure(data=go.Scatterpolar(r=vals, theta=list(u['stats'].keys()), fill='toself', line_color='#00FFCC'))
+        # Dynamique de l'axe : minimum 5 pour voir le point au milieu
+        fig_r.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, max(vals)+5 if max(vals) > 0 else 5])), template="plotly_dark", height=400)
         st.plotly_chart(fig_r, use_container_width=True)
 
 with tabs[2]:
     st.subheader("🧩 Architecture du Système")
     st.markdown(f"""
     **📏 Capacité & Quotas**
-    - **Quotidiennes** : {get_capacity_for_period(u['level'], 'Quotidiennes')} slots (Base: 4 | +1 par 20 lvls).
+    - **Quotidiennes** : {get_capacity_for_period(u['level'], 'Quotidiennes')} slots.
     - **Autres** : 1 slot fixe.
     
-    **⚖️ Échelle des Poids (Multiplicateurs)**
-    - Quotidiennes : 1 à 3
-    - Hebdo : 1 à 5
-    - Mensuelles : 1 à 7
-    - Trimestrielles : 1 à 9
-    - Annuelles : 1 à 11
+    **⚖️ Échelle des Poids**
+    - Quotidiennes (1-3) | Hebdo (1-5) | Mensuelles (1-7) | Trimestrielles (1-9) | Annuelles (1-11)
     
     **🧬 Évolution du Radar**
-    Chaque succès rapporte `+ (Poids x 0.1)` dans la statistique liée.
+    Vos statistiques commencent à **0**. Chaque succès rapporte **1 point par unité de poids**.
     """)
 
 with tabs[3]:
@@ -161,23 +176,21 @@ with tabs[3]:
         if len(u["task_lists"].get(sel_p, [])) >= cap: st.error(f"Limite atteinte pour {sel_p} ({cap} slots).")
         elif t_add and t_add not in u["task_stat_links"]:
             u["task_lists"][sel_p].append(t_add); u["task_stat_links"][t_add] = stat_link; save_data(u); st.rerun()
-    
     for p, tasks in u["task_lists"].items():
         if tasks:
             st.write(f"**{p}**")
             for i, t in enumerate(tasks):
                 cx1, cx2, cx3 = st.columns([2, 1, 1])
-                new_name = cx1.text_input("Nom", value=t, key=f"edit_n_{p}_{i}", label_visibility="collapsed")
-                new_stat = cx2.selectbox("Stat", ["Physique", "Connaissances", "Autonomie", "Mental"], index=["Physique", "Connaissances", "Autonomie", "Mental"].index(u['task_stat_links'].get(t, "Physique")), key=f"edit_s_{p}_{i}", label_visibility="collapsed")
+                new_n = cx1.text_input("Nom", t, key=f"en_{p}_{i}", label_visibility="collapsed")
+                new_s = cx2.selectbox("Stat", ["Physique", "Connaissances", "Autonomie", "Mental"], index=["Physique", "Connaissances", "Autonomie", "Mental"].index(u['task_stat_links'].get(t, "Physique")), key=f"es_{p}_{i}", label_visibility="collapsed")
                 c_btn = cx3.columns(2)
-                if c_btn[0].button("💾", key=f"save_{p}_{i}"):
-                    if new_name != t:
-                        u["task_lists"][p][i] = new_name
-                        u["task_stat_links"][new_name] = u["task_stat_links"].pop(t)
-                        if t in u["task_diffs"]: u["task_diffs"][new_name] = u["task_diffs"].pop(t)
-                    u["task_stat_links"][new_name] = new_stat; save_data(u); st.rerun()
-                if c_btn[1].button("❌", key=f"del_{p}_{i}"):
-                    u["task_lists"][p].remove(t); u["task_stat_links"].pop(t, None); save_data(u); st.rerun()
+                if c_btn[0].button("💾", key=f"s_{p}_{i}"):
+                    if new_n != t:
+                        u["task_lists"][p][i] = new_n
+                        u["task_stat_links"][new_n] = u["task_stat_links"].pop(t)
+                        if t in u["task_diffs"]: u["task_diffs"][new_n] = u["task_diffs"].pop(t)
+                    u["task_stat_links"][new_n] = new_s; save_data(u); st.rerun()
+                if c_btn[1].button("❌", key=f"d_{p}_{i}"): u["task_lists"][p].remove(t); u["task_stat_links"].pop(t, None); save_data(u); st.rerun()
 
 with st.sidebar:
     st.header("⏳ Temps")
@@ -190,4 +203,4 @@ with st.sidebar:
             if p == "Quotidiennes": u["internal_date"] = (datetime.strptime(u["internal_date"], "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
             u["completed_quests"] = [q for q in u["completed_quests"] if q not in u["task_lists"].get(p, [])]; save_data(u); st.rerun()
     st.divider()
-    if st.button("💀 HARD RESET"): save_data({"level": 1, "xp": 0, "mode": "Séide", "stats": {"Physique": 10, "Connaissances": 10, "Autonomie": 10, "Mental": 10}, "completed_quests": [], "task_lists": {"Quotidiennes": [], "Hebdomadaires": [], "Mensuelles": [], "Trimestrielles": [], "Annuelles": []}, "task_diffs": {}, "task_stat_links": {}, "combat_log": [], "xp_history": [], "internal_date": "2026-01-03"}); st.rerun()
+    if st.button("💀 HARD RESET"): save_data(get_default_data()); st.rerun()
