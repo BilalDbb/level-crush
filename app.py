@@ -68,6 +68,7 @@ def process_xp_change(amount, status="fait"):
         while u['xp'] < 0 and u['level'] > 1:
             u['level'] -= 1; u['xp'] += get_xp_required(u['level']); st.toast("📉 LEVEL DOWN...")
     if u['xp'] < 0: u['xp'] = 0
+    # Enregistrement du point avec la date interne
     u["xp_history"].append({
         "date": u["internal_date"],
         "xp_cumul": get_total_cumulated_xp(u['level'], u['xp']),
@@ -89,7 +90,6 @@ with tabs[0]:
     st.write(f"XP : **{u['xp']} / {req}**")
     st.divider()
     idx = 0
-    # Ordre strict pour l'affichage
     for q_p in ["Quotidiennes", "Hebdomadaires", "Mensuelles", "Trimestrielles", "Annuelles"]:
         m_d = {"Quotidiennes":3, "Hebdomadaires":5, "Mensuelles":7, "Trimestrielles":9, "Annuelles":11}[q_p]
         tasks = u["task_lists"].get(q_p, [])
@@ -104,7 +104,7 @@ with tabs[0]:
                         diff = c[1].select_slider("Poids", options=list(range(1, m_d+1)), value=val_diff, key=f"s_{idx}", label_visibility="collapsed")
                         u["task_diffs"][task] = diff
                         if c[2].button("✔️", key=f"v_{idx}"):
-                            process_xp_change(100 * diff)
+                            process_xp_change(100 * diff, "fait")
                             u["completed_quests"].append(task)
                             save_data(u); st.rerun()
                         if u['mode'] == "Exalté" and len(c) > 3:
@@ -118,20 +118,25 @@ with tabs[1]:
     c1, c2 = st.columns([1.5, 1])
     with c1:
         st.subheader("📈 Progression")
-        try:
-            if u["xp_history"]:
-                df = pd.DataFrame(u["xp_history"])
-                df['date'] = pd.to_datetime(df['date'])
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(x=df['date'], y=df['xp_cumul'], mode='lines+markers', line=dict(color='#00FFCC'), name="XP Cumulée"))
-                fig.update_layout(template="plotly_dark", height=400, showlegend=True, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-                st.plotly_chart(fig, use_container_width=True)
-            else: st.info("Aucune donnée disponible.")
-        except: st.warning("Données graphiques corrompues. Hard Reset conseillé.")
+        if u["xp_history"]:
+            df = pd.DataFrame(u["xp_history"])
+            df['date'] = pd.to_datetime(df['date'])
+            fig = go.Figure()
+            # Ligne de base
+            fig.add_trace(go.Scatter(x=df['date'], y=df['xp_cumul'], mode='lines', line=dict(color='#00FFCC', width=2), name="Courbe XP"))
+            # Points avec légende couleur
+            for status, color, label in [('fait', '#00FFCC', 'Succès'), ('orange', 'orange', 'Partiel'), ('rouge', 'red', 'Échec')]:
+                sub = df[df['status'] == status]
+                if not sub.empty:
+                    fig.add_trace(go.Scatter(x=sub['date'], y=sub['xp_cumul'], mode='markers', marker=dict(color=color, size=8), name=label))
+            
+            fig.update_layout(template="plotly_dark", height=450, showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+            st.plotly_chart(fig, use_container_width=True)
+        else: st.info("Simulez une progression pour voir le graphique.")
     with c2:
         st.subheader("🕸️ Profil de Puissance")
         fig_r = go.Figure(data=go.Scatterpolar(r=list(u['stats'].values()), theta=list(u['stats'].keys()), fill='toself', line_color='#00FFCC'))
-        fig_r.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, max(u['stats'].values())+10])), template="plotly_dark")
+        fig_r.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, max(u['stats'].values())+10])), template="plotly_dark", height=450)
         st.plotly_chart(fig_r, use_container_width=True)
 
 # --- TAB 3 : TITRES ---
@@ -142,18 +147,6 @@ with tabs[2]:
         with cols[i % 4]:
             st.markdown(f"<div style='background:{'#1E1E1E' if unlocked else '#0A0A0A'}; border:2px solid {'#00FFCC' if unlocked else '#333'}; padding:15px; border-radius:10px; text-align:center; margin-bottom:15px;'><span style='color:{'#00FFCC' if unlocked else '#444'}; font-size:0.8em;'>Niveau {l_req}</span><br><b style='color:{'white' if unlocked else '#444'};'>{title if unlocked else '???'}</b></div>", unsafe_allow_html=True)
 
-# --- TAB 4 : SYSTÈME ---
-with tabs[3]:
-    st.subheader("🧩 Architecture du Système")
-    st.markdown("""
-    **⚖️ Fonctionnement de la Difficulté**
-    Le curseur multiplie vos gains d'XP et de Statistiques. 
-    
-    **🎮 Modes de Jeu**
-    - **Séide** : Pas de pénalité. Progression sécurisée.
-    - **Exalté** : Perte d'XP et de niveau possible sur les Quêtes Quotidiennes.
-    """)
-
 # --- TAB 5 : CONFIGURATION ---
 with tabs[4]:
     new_m = st.radio("Difficulté", ["Séide", "Exalté"], index=["Séide", "Exalté"].index(u["mode"]))
@@ -161,7 +154,7 @@ with tabs[4]:
     st.divider()
     cp, ct, cb = st.columns([1, 2, 1])
     sel_p = cp.selectbox("Période", ["Quotidiennes", "Hebdomadaires", "Mensuelles", "Trimestrielles", "Annuelles"])
-    t_add = ct.text_input("Ajouter une tâche")
+    t_add = ct.text_input("Tâche")
     if cb.button("Ajouter"):
         all_t = [t for sub in u["task_lists"].values() for t in sub]
         if t_add not in all_t and t_add: u["task_lists"][sel_p].append(t_add); save_data(u); st.rerun()
@@ -178,6 +171,7 @@ with tabs[4]:
 # --- SIDEBAR (CONTRÔLE) ---
 with st.sidebar:
     st.header("⏳ Temps")
+    st.info(f"Date Système : {u['internal_date']}")
     if st.button("⏭️ SAUTER UN JOUR"):
         if u['mode'] == "Exalté":
             d_count = len(u["task_lists"].get("Quotidiennes", []))
