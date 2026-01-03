@@ -29,14 +29,14 @@ def get_capacity_for_period(lvl, period):
     if period == "Quotidiennes": return 4 + (lvl // 20)
     return 1
 
-# --- 3. CONFIGURATION DES TITRES (Couleurs Uniques) ---
+# --- 3. CONFIGURATION DES TITRES (Palette Distinctive) ---
 TITLES_DATA = [
-    (1, "Starter", "#95A5A6"), (3, "Néophyte", "#7F8C8D"), (6, "Aspirant", "#BDC3C7"),
-    (10, "Soldat de Plomb", "#D35400"), (14, "Gardien de Fer", "#34495E"), (19, "Traqueur Silencieux", "#2C3E50"),
-    (24, "Vanguard", "#2980B9"), (30, "Chevalier d'Acier", "#5D6D7E"), (36, "Briseur de Chaînes", "#E67E22"),
-    (43, "Architecte du Destin", "#8E44AD"), (50, "Légat du Système", "#16A085"), (58, "Commandeur", "#27AE60"),
-    (66, "Seigneur de Guerre", "#C0392B"), (75, "Entité Transcendante", "#F1C40F"), (84, "Demi-Dieu", "#F39C12"),
-    (93, "Souverain", "#E74C3C"), (100, "LEVEL CRUSHER", "#00FFCC")
+    (1, "Starter", "#FFFFFF"), (3, "Néophyte", "#3498DB"), (6, "Aspirant", "#2ECC71"),
+    (10, "Soldat de Plomb", "#E67E22"), (14, "Gardien de Fer", "#95A5A6"), (19, "Traqueur Silencieux", "#9B59B6"),
+    (24, "Vanguard", "#1ABC9C"), (30, "Chevalier d'Acier", "#BDC3C7"), (36, "Briseur de Chaînes", "#F39C12"),
+    (43, "Architecte du Destin", "#34495E"), (50, "Légat du Système", "#16A085"), (58, "Commandeur", "#27AE60"),
+    (66, "Seigneur de Guerre", "#C0392B"), (75, "Entité Transcendante", "#F1C40F"), (84, "Demi-Dieu", "#E74C3C"),
+    (93, "Souverain", "#8E44AD"), (100, "LEVEL CRUSHER", "#000000") # Noir profond pour le dernier titre
 ]
 
 def get_current_title_info(lvl):
@@ -81,12 +81,14 @@ st.set_page_config(page_title="LEVEL CRUSH", layout="wide")
 
 # HEADER
 curr_l_req, title_name, title_color = get_current_title_info(u['level'])
+# Effet spécial pour LEVEL CRUSHER (Noir avec lueur Turquoise)
+glow_color = "#00FFCC" if title_name == "LEVEL CRUSHER" else title_color
 st.markdown(f"""
     <div style="text-align:center; padding:10px;">
         <span style="color:white; font-size:1.1em; vertical-align:middle;">NIV.{u['level']}</span>
-        <div style="display:inline-block; margin-left:12px; padding:4px 18px; border:2px solid {title_color}; 
-                    border-radius:20px; box-shadow: 0 0 12px {title_color};">
-            <b style="color:{title_color}; font-size:1.3em; text-transform:uppercase; letter-spacing:1px;">{title_name}</b>
+        <div style="display:inline-block; margin-left:12px; padding:4px 18px; border:2px solid {glow_color}; 
+                    border-radius:20px; box-shadow: 0 0 12px {glow_color}; background: {title_color};">
+            <b style="color:{'#00FFCC' if title_name == 'LEVEL CRUSHER' else 'white' if title_color == '#000000' else 'white'}; font-size:1.3em; text-transform:uppercase; letter-spacing:1px;">{title_name}</b>
         </div>
     </div>
 """, unsafe_allow_html=True)
@@ -106,14 +108,14 @@ with tabs[0]:
             is_current = curr_l_req == l_req
             disp_name = t_name if is_unlocked else "???"
             dot_color = t_color if is_unlocked else "#333"
-            opacity = "1" if is_unlocked else "0.4"
-            pulse = "pulse-active" if is_current else ""
-            border = "2px solid white" if is_current else "1px solid rgba(255,255,255,0.1)"
+            opacity = "1" if is_unlocked else "0.3"
+            pulse_class = "pulse-active" if is_current else ""
+            border_style = f"border: 2px solid {'white' if is_current else 'transparent'};"
             
             items_html += f"""
                 <div style="min-width: 95px; text-align: center; opacity: {opacity}; margin-right: 15px;">
-                    <div class="dot {pulse}" style="width: 14px; height: 14px; background: {dot_color}; border-radius: 50%; margin: 0 auto; {border}"></div>
-                    <p style="font-size: 11px; color: {dot_color}; margin-top: 8px; font-weight: bold; font-family: sans-serif; white-space: nowrap;">{disp_name}</p>
+                    <div class="dot {pulse_class}" style="width: 14px; height: 14px; background: {dot_color}; border-radius: 50%; margin: 0 auto; {border_style}"></div>
+                    <p style="font-size: 11px; color: {'#00FFCC' if disp_name == 'LEVEL CRUSHER' else dot_color if is_unlocked else '#666'}; margin-top: 8px; font-weight: bold; font-family: sans-serif; white-space: nowrap;">{disp_name}</p>
                     <p style="font-size: 9px; color: #666; font-family: sans-serif;">Niv.{l_req}</p>
                 </div>
             """
@@ -122,9 +124,9 @@ with tabs[0]:
             <style>
             body {{ background-color: transparent; margin: 0; overflow: hidden; }}
             @keyframes pulse-anim {{
-                0% {{ box-shadow: 0 0 0 0 {title_color}77; }}
-                70% {{ box-shadow: 0 0 0 8px {title_color}00; }}
-                100% {{ box-shadow: 0 0 0 0 {title_color}00; }}
+                0% {{ box-shadow: 0 0 0 0 {glow_color}77; }}
+                70% {{ box-shadow: 0 0 0 8px {glow_color}00; }}
+                100% {{ box-shadow: 0 0 0 0 {glow_color}00; }}
             }}
             .pulse-active {{ animation: pulse-anim 2s infinite; }}
             .scroll-wrapper {{
