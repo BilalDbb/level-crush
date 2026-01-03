@@ -25,9 +25,11 @@ def get_total_cumulated_xp(lvl, current_xp):
         total += get_xp_required(l)
     return total + current_xp
 
-def get_task_capacity(lvl):
-    """Calcule le nombre max de tâches : 4 base + 5 (périodes) + 1 tous les 20 niveaux"""
-    return 4 + 5 + (lvl // 20)
+def get_capacity_for_period(lvl, period):
+    """Quotidiennes : 4 + 1 par 20 lvls. Autres : toujours 1."""
+    if period == "Quotidiennes":
+        return 4 + (lvl // 20)
+    return 1
 
 # --- 3. GESTION DES DONNÉES ---
 MY_ID = "shadow_monarch_01" 
@@ -78,7 +80,7 @@ def process_xp_change(amount, status="fait"):
         "status": status
     })
 
-# --- 4. CONFIGURATION TITRES ---
+# --- 4. CONFIGURATION ---
 TITLES = {1: "Rang E", 3: "Néophyte", 6: "Aspirant", 10: "Soldat de Plomb", 14: "Gardien de Fer", 19: "Traqueur Silencieux", 24: "Vanguard", 30: "Chevalier d'Acier", 36: "Briseur de Chaînes", 43: "Architecte du Destin", 50: "Légat du Système", 58: "Commandeur", 66: "Seigneur de Guerre", 75: "Entité Transcendante", 84: "Demi-Dieu", 93: "Souverain", 100: "LEVEL CRUSHER"}
 
 st.set_page_config(page_title="LEVEL CRUSH", layout="wide")
@@ -96,7 +98,8 @@ with tabs[0]:
     for q_p in ["Quotidiennes", "Hebdomadaires", "Mensuelles", "Trimestrielles", "Annuelles"]:
         tasks = u["task_lists"].get(q_p, [])
         if tasks:
-            with st.expander(f"{q_p}", expanded=True):
+            cap = get_capacity_for_period(u['level'], q_p)
+            with st.expander(f"{q_p} ({len(tasks)}/{cap})", expanded=True):
                 for task in tasks:
                     done = task in u["completed_quests"]
                     c = st.columns([2, 1, 0.5, 0.5] if u['mode'] == "Exalté" else [2, 1, 1])
@@ -108,40 +111,35 @@ with tabs[0]:
                         u["task_diffs"][task] = diff
                         if c[2].button("✔️", key=f"v_{idx}"):
                             process_xp_change(100 * diff, "fait")
-                            u["completed_quests"].append(task)
-                            save_data(u); st.rerun()
+                            u["completed_quests"].append(task); save_data(u); st.rerun()
                         if u['mode'] == "Exalté" and len(c) > 3:
                             if c[3].button("❌", key=f"x_{idx}"):
-                                process_xp_change(-(100 * diff), "rouge")
-                                save_data(u); st.rerun()
+                                process_xp_change(-(100 * diff), "rouge"); save_data(u); st.rerun()
                     idx += 1
 
 # --- TAB 2 : STATISTIQUES ---
 with tabs[1]:
     c1, c2 = st.columns([1.5, 1])
     with c1:
-        st.markdown("<h3 style='text-align: center;'>📈 Progression</h3>", unsafe_allow_html=True)
+        st.markdown("<h3 style='text-align: center; margin-bottom: 0px;'>📈 Progression</h3>", unsafe_allow_html=True)
         if u["xp_history"]:
             df = pd.DataFrame(u["xp_history"])
             df['date'] = pd.to_datetime(df['date'])
             fig = go.Figure()
-            fig.add_trace(go.Scatter(x=df['date'], y=df['xp_cumul'], mode='lines', line=dict(color='#00FFCC', width=2), name="XP Cumulée"))
+            fig.add_trace(go.Scatter(x=df['date'], y=df['xp_cumul'], mode='lines', line=dict(color='#00FFCC', width=2), name="XP"))
             for status, color, label in [('fait', '#00FFCC', 'Succès'), ('orange', 'orange', 'Partiel'), ('rouge', 'red', 'Échec')]:
                 sub = df[df['status'] == status]
-                if not sub.empty:
-                    fig.add_trace(go.Scatter(x=sub['date'], y=sub['xp_cumul'], mode='markers', marker=dict(color=color, size=8), name=label))
-            fig.update_layout(template="plotly_dark", height=400, showlegend=True, margin=dict(l=10, r=10, t=10, b=10), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+                if not sub.empty: fig.add_trace(go.Scatter(x=sub['date'], y=sub['xp_cumul'], mode='markers', marker=dict(color=color, size=8), name=label))
+            fig.update_layout(template="plotly_dark", height=400, margin=dict(l=10, r=10, t=10, b=10), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
             st.plotly_chart(fig, use_container_width=True)
-        else: st.info("Aucune donnée.")
     with c2:
-        st.markdown("<h3 style='text-align: center;'>🕸️ Profil de Puissance</h3>", unsafe_allow_html=True)
+        st.markdown("<h3 style='text-align: center; margin-bottom: 0px;'>🕸️ Profil de Puissance</h3>", unsafe_allow_html=True)
         fig_r = go.Figure(data=go.Scatterpolar(r=list(u['stats'].values()), theta=list(u['stats'].keys()), fill='toself', line_color='#00FFCC'))
         fig_r.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, max(u['stats'].values())+10])), template="plotly_dark", height=400, margin=dict(l=40, r=40, t=10, b=10))
         st.plotly_chart(fig_r, use_container_width=True)
 
 # --- TAB 3 : TITRES ---
 with tabs[2]:
-    st.subheader("🎖️ Arbre des Titres")
     cols = st.columns(4)
     for i, (l_req, title) in enumerate(TITLES.items()):
         unlocked = u['level'] >= l_req
@@ -150,12 +148,12 @@ with tabs[2]:
 
 # --- TAB 4 : SYSTÈME ---
 with tabs[3]:
+    cap_q = get_capacity_for_period(u['level'], "Quotidiennes")
     st.subheader("🧩 Architecture du Système")
     st.markdown(f"""
-    **📏 Capacité de Tâches**
-    Votre limite actuelle est de **{get_task_capacity(u['level'])}** emplacements.
-    - 4 de base + 5 (1 par période).
-    - +1 emplacement tous les **20 niveaux**.
+    **📏 Limites de Tâches**
+    - **Quotidiennes** : {cap_q} slots (Base: 4 | +1 par 20 lvls).
+    - **Hebdo / Mensuel / Trimestriel / Annuel** : 1 slot maximum (Fixe).
     """)
 
 # --- TAB 5 : CONFIGURATION ---
@@ -164,41 +162,37 @@ with tabs[4]:
     if new_m != u["mode"]: u["mode"] = new_m; save_data(u); st.rerun()
     st.divider()
     
-    total_tasks = sum(len(v) for v in u["task_lists"].values())
-    max_cap = get_task_capacity(u['level'])
-    st.subheader(f"⚙️ Tâches ({total_tasks} / {max_cap})")
-    
+    st.subheader(f"⚙️ Gestion des Tâches")
     cp, ct, cb = st.columns([1, 2, 1])
     sel_p = cp.selectbox("Période", ["Quotidiennes", "Hebdomadaires", "Mensuelles", "Trimestrielles", "Annuelles"])
     t_add = ct.text_input("Tâche")
     
     if cb.button("Ajouter"):
-        if total_tasks >= max_cap:
-            st.error(f"Limite atteinte ({max_cap}). Atteignez le prochain palier (multiple de 20) !")
+        cap_limit = get_capacity_for_period(u['level'], sel_p)
+        if len(u["task_lists"].get(sel_p, [])) >= cap_limit:
+            st.error(f"Limite atteinte pour {sel_p} ({cap_limit}).")
         else:
             all_t = [t for sub in u["task_lists"].values() for t in sub]
             if t_add not in all_t and t_add:
-                u["task_lists"][sel_p].append(t_add)
-                save_data(u); st.rerun()
+                u["task_lists"][sel_p].append(t_add); save_data(u); st.rerun()
 
     for p in ["Quotidiennes", "Hebdomadaires", "Mensuelles", "Trimestrielles", "Annuelles"]:
         tasks = u["task_lists"].get(p, [])
         if tasks:
-            st.write(f"**{p}**")
+            cap_limit = get_capacity_for_period(u['level'], p)
+            st.write(f"**{p} ({len(tasks)}/{cap_limit})**")
             for i, t in enumerate(tasks):
                 cx1, cx2 = st.columns([4, 1])
                 cx1.write(f"• {t}")
                 if cx2.button("❌", key=f"del_{p}_{i}"):
                     u["task_lists"][p].remove(t); save_data(u); st.rerun()
 
-# --- SIDEBAR (CONTRÔLE) ---
+# --- SIDEBAR ---
 with st.sidebar:
     st.header("⏳ Temps")
     st.info(f"Date : {u['internal_date']}")
     if st.button("⏭️ SAUTER UN JOUR"):
-        if u['mode'] == "Exalté":
-            d_count = len(u["task_lists"].get("Quotidiennes", []))
-            process_xp_change(-(d_count * 100), "rouge")
+        if u['mode'] == "Exalté": process_xp_change(-(len(u["task_lists"].get("Quotidiennes", [])) * 100), "rouge")
         curr_dt = datetime.strptime(u["internal_date"], "%Y-%m-%d")
         u["internal_date"] = (curr_dt + timedelta(days=1)).strftime("%Y-%m-%d")
         u["completed_quests"] = [q for q in u["completed_quests"] if q not in u["task_lists"].get("Quotidiennes", [])]
@@ -212,9 +206,6 @@ with st.sidebar:
                 u["internal_date"] = (curr_dt + timedelta(days=1)).strftime("%Y-%m-%d")
             u["completed_quests"] = [q for q in u["completed_quests"] if q not in u["task_lists"].get(p, [])]
             save_data(u); st.rerun()
-    
     st.divider()
     if st.button("💀 HARD RESET", type="primary"):
-        st.session_state.user_data = get_default_data()
-        save_data(st.session_state.user_data)
-        st.rerun()
+        st.session_state.user_data = get_default_data(); save_data(st.session_state.user_data); st.rerun()
