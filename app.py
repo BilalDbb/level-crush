@@ -28,10 +28,10 @@ def get_capacity_for_period(lvl, period):
     if period == "Quotidiennes": return 4 + (lvl // 20)
     return 1
 
-# --- 3. CONFIGURATION DES TITRES & BADGES (SYNTAXE CORRIGÉE) ---
+# --- 3. CONFIGURATION DES TITRES & BADGES ---
 TITLES_DATA = [
-    (1, "Rang E", "#7F8C8D"), (3, "Néophyte", "#95A5A6"), (6, "Aspirant", "#BDC3C7"),
-    (10, "Soldat de Plomb", "#D35400"), (14, "Gardien de Fer", "#7F8C8D"), (19, "Traqueur Silencieux", "#2C3E50"),
+    (1, "Starter", "#7F8C8D"), (3, "Néophyte", "#95A5A6"), (6, "Aspirant", "#BDC3C7"),
+    (10, "Soldat de Plomb", "#D35400"), (14, "Gardien de Fer", "#95A5A6"), (19, "Traqueur Silencieux", "#2C3E50"),
     (24, "Vanguard", "#2980B9"), (30, "Chevalier d'Acier", "#34495E"), (36, "Briseur de Chaînes", "#E67E22"),
     (43, "Architecte du Destin", "#8E44AD"), (50, "Légat du Système", "#16A085"), (58, "Commandeur", "#27AE60"),
     (66, "Seigneur de Guerre", "#C0392B"), (75, "Entité Transcendante", "#F1C40F"), (84, "Demi-Dieu", "#F39C12"),
@@ -96,46 +96,47 @@ st.set_page_config(page_title="LEVEL CRUSH", layout="wide")
 _, title_name, title_color = get_current_title_info(u['level'])
 st.markdown(f"""
     <div style="text-align:center; padding:10px;">
-        <span style="color:white; font-size:1.2em; vertical-align:middle;">NIV.{u['level']}</span>
-        <div style="display:inline-block; margin-left:15px; padding:5px 20px; border:2px solid {title_color}; 
-                    border-radius:20px; box-shadow: 0 0 15px {title_color};">
-            <b style="color:{title_color}; font-size:1.5em; text-transform:uppercase; letter-spacing:2px;">{title_name}</b>
+        <span style="color:white; font-size:1.1em; vertical-align:middle;">NIV.{u['level']}</span>
+        <div style="display:inline-block; margin-left:12px; padding:4px 18px; border:2px solid {title_color}; 
+                    border-radius:20px; box-shadow: 0 0 12px {title_color};">
+            <b style="color:{title_color}; font-size:1.3em; text-transform:uppercase; letter-spacing:1px;">{title_name}</b>
         </div>
     </div>
 """, unsafe_allow_html=True)
 
 tabs = st.tabs(["⚔️ Quêtes", "📊 Statistiques", "🧩 Système", "⚙️ Configuration"])
 
-# --- TAB 1 : QUÊTES & TIMELINE ---
+# --- TAB 1 : QUÊTES & ASCENSION ---
 with tabs[0]:
-    # BARRE XP
     req = get_xp_required(u['level'])
     st.progress(min(max(u['xp']/req, 0.0), 1.0))
     st.write(f"XP : **{u['xp']} / {req}**")
     
-    # TIMELINE DES TITRES (HORIZONTALE)
-    st.markdown("<br>", unsafe_allow_html=True)
-    cols_t = st.columns(len(TITLES_DATA))
-    for i, (l_req, t_name, t_color) in enumerate(TITLES_DATA):
-        is_current = get_current_title_info(u['level'])[0] == l_req
-        is_unlocked = u['level'] >= l_req
-        
-        with cols_t[i]:
-            bg = t_color if is_unlocked else "#222"
-            border = "white" if is_current else "transparent"
-            op = "1" if is_unlocked else "0.3"
+    with st.expander("📜 Chemin de l'Ascension", expanded=False):
+        # Timeline Horizontale Optimisée Smartphone (Scrollable)
+        timeline_html = '<div style="display: flex; overflow-x: auto; padding: 20px 0; scroll-behavior: smooth;">'
+        for l_req, t_name, t_color in TITLES_DATA:
+            is_unlocked = u['level'] >= l_req
+            is_current = get_current_title_info(u['level'])[0] == l_req
+            disp_name = t_name if is_unlocked else "???"
+            dot_color = t_color if is_unlocked else "#333"
+            opacity = "1" if is_unlocked else "0.4"
             pulse = "animation: pulse 2s infinite;" if is_current else ""
+            border = "white" if is_current else "transparent"
             
-            st.markdown(f"""
-                <style>
-                @keyframes pulse {{ 0% {{ box-shadow: 0 0 0 0 {t_color}77; }} 70% {{ box-shadow: 0 0 0 10px {t_color}00; }} 100% {{ box-shadow: 0 0 0 0 {t_color}00; }} }}
-                </style>
-                <div style="text-align:center; opacity:{op};">
-                    <div style="width:12px; height:12px; background:{bg}; border-radius:50%; margin:0 auto; border:2px solid {border}; {pulse}"></div>
-                    <p style="font-size:0.55em; color:{bg if is_unlocked else '#555'}; margin-top:5px; line-height:1;">{t_name}</p>
+            timeline_html += f"""
+                <div style="min-width: 80px; text-align: center; opacity: {opacity}; margin-right: 10px;">
+                    <style>
+                    @keyframes pulse {{ 0% {{ box-shadow: 0 0 0 0 {t_color}77; }} 70% {{ box-shadow: 0 0 0 8px {t_color}00; }} 100% {{ box-shadow: 0 0 0 0 {t_color}00; }} }}
+                    </style>
+                    <div style="width: 14px; height: 14px; background: {dot_color}; border-radius: 50%; margin: 0 auto; border: 2px solid {border}; {pulse}"></div>
+                    <p style="font-size: 0.6em; color: {dot_color}; margin-top: 8px; font-weight: bold;">{disp_name}</p>
+                    <p style="font-size: 0.5em; color: #555;">Niv.{l_req}</p>
                 </div>
-            """, unsafe_allow_html=True)
-    
+            """
+        timeline_html += '</div>'
+        st.markdown(timeline_html, unsafe_allow_html=True)
+
     st.divider()
     
     # LISTE DES QUÊTES
@@ -170,7 +171,7 @@ with tabs[1]:
             df = pd.DataFrame(u["xp_history"]); df['date'] = pd.to_datetime(df['date'])
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=df['date'], y=df['xp_cumul'], mode='lines', line=dict(color='#00FFCC', width=2), name="XP"))
-            for status, color, label in [('fait', '#00FFCC', 'Succès'), ('orange', 'orange', 'Partiel'), ('rouge', 'red', 'Échec')]:
+            for status, color, label in [('fait', '#00FFCC', 'Succès'), ('rouge', 'red', 'Échec')]:
                 sub = df[df['status'] == status]
                 if not sub.empty: fig.add_trace(go.Scatter(x=sub['date'], y=sub['xp_cumul'], mode='markers', marker=dict(color=color, size=8), name=label))
             fig.update_layout(template="plotly_dark", height=400, margin=dict(l=10, r=10, t=10, b=10), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
@@ -197,7 +198,7 @@ with tabs[3]:
     t_add = ct.text_input("Tâche")
     if cb.button("Ajouter"):
         cap_limit = get_capacity_for_period(u['level'], sel_p)
-        if len(u["task_lists"].get(sel_p, [])) >= cap_limit: st.error(f"Limite atteinte.")
+        if len(u["task_lists"].get(sel_p, [])) >= cap_limit: st.error("Limite atteinte.")
         else:
             if t_add and t_add not in [t for sub in u["task_lists"].values() for t in sub]:
                 u["task_lists"][sel_p].append(t_add); save_data(u); st.rerun()
@@ -223,5 +224,4 @@ with st.sidebar:
             u["completed_quests"] = [q for q in u["completed_quests"] if q not in u["task_lists"].get(p, [])]
             save_data(u); st.rerun()
     st.divider()
-    if st.button("💀 HARD RESET", type="primary"): 
-        u = get_default_data(); save_data(u); st.rerun()
+    if st.button("💀 HARD RESET", type="primary"): u = get_default_data(); save_data(u); st.rerun()
