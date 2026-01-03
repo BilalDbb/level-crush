@@ -29,14 +29,14 @@ def get_capacity_for_period(lvl, period):
     if period == "Quotidiennes": return 4 + (lvl // 20)
     return 1
 
-# --- 3. CONFIGURATION DES TITRES (Palette Distinctive) ---
+# --- 3. CONFIGURATION DES TITRES ---
 TITLES_DATA = [
-    (1, "Starter", "#FFFFFF"), (3, "Néophyte", "#3498DB"), (6, "Aspirant", "#2ECC71"),
+    (1, "Starter", "#DCDDDF"), (3, "Néophyte", "#3498DB"), (6, "Aspirant", "#2ECC71"),
     (10, "Soldat de Plomb", "#E67E22"), (14, "Gardien de Fer", "#95A5A6"), (19, "Traqueur Silencieux", "#9B59B6"),
     (24, "Vanguard", "#1ABC9C"), (30, "Chevalier d'Acier", "#BDC3C7"), (36, "Briseur de Chaînes", "#F39C12"),
     (43, "Architecte du Destin", "#34495E"), (50, "Légat du Système", "#16A085"), (58, "Commandeur", "#27AE60"),
     (66, "Seigneur de Guerre", "#C0392B"), (75, "Entité Transcendante", "#F1C40F"), (84, "Demi-Dieu", "#E74C3C"),
-    (93, "Souverain", "#8E44AD"), (100, "LEVEL CRUSHER", "#000000") # Noir profond pour le dernier titre
+    (93, "Souverain", "#8E44AD"), (100, "LEVEL CRUSHER", "#000000")
 ]
 
 def get_current_title_info(lvl):
@@ -54,17 +54,31 @@ def load_data():
         if res.data:
             d = res.data[0]['data']
             if isinstance(d, str): d = json.loads(d)
+            # Migration : ajout du journal et lien stats
+            if "combat_log" not in d: d["combat_log"] = []
+            if "task_stat_links" not in d: d["task_stat_links"] = {}
             return d
     except: pass
-    return {"level": 1, "xp": 0, "mode": "Séide", "stats": {"Physique": 10, "Connaissances": 10, "Autonomie": 10, "Mental": 10}, "completed_quests": [], "task_lists": {"Quotidiennes": [], "Hebdomadaires": [], "Mensuelles": [], "Trimestrielles": [], "Annuelles": []}, "task_diffs": {}, "xp_history": [], "internal_date": "2026-01-03"}
+    return {"level": 1, "xp": 0, "mode": "Séide", "stats": {"Physique": 10, "Connaissances": 10, "Autonomie": 10, "Mental": 10}, "completed_quests": [], "task_lists": {"Quotidiennes": [], "Hebdomadaires": [], "Mensuelles": [], "Trimestrielles": [], "Annuelles": []}, "task_diffs": {}, "task_stat_links": {}, "combat_log": [], "xp_history": [], "internal_date": "2026-01-03"}
 
 def save_data(data):
     supabase.table('profiles').upsert({"user_id": MY_ID, "data": data}).execute()
 
 u = load_data()
 
-def process_xp_change(amount, status="fait"):
+def process_xp_change(amount, task_name=None, status="fait"):
     u['xp'] += amount
+    log_msg = f"{status.upper()} : {task_name if task_name else 'Inconnu'} ({amount:+d} XP)"
+    
+    # Gain de stat si succès
+    if status == "fait" and task_name in u["task_stat_links"]:
+        stat_name = u["task_stat_links"][task_name]
+        poids = u["task_diffs"].get(task_name, 1)
+        gain_stat = round(poids * 0.1, 2)
+        u["stats"][stat_name] = round(u["stats"][stat_name] + gain_stat, 2)
+        log_msg += f" | +{gain_stat} {stat_name}"
+
+    # Gestion Level Up/Down
     while True:
         req = get_xp_required(u['level'])
         if u['xp'] >= req and u['level'] < 100:
@@ -74,146 +88,105 @@ def process_xp_change(amount, status="fait"):
         while u['xp'] < 0 and u['level'] > 1:
             u['level'] -= 1; u['xp'] += get_xp_required(u['level']); st.toast("📉 LEVEL DOWN...")
     if u['xp'] < 0: u['xp'] = 0
+    
+    # Historique & Log
     u["xp_history"].append({"date": u["internal_date"], "xp_cumul": get_total_cumulated_xp(u['level'], u['xp']), "status": status})
+    u["combat_log"].insert(0, f"[{u['internal_date']}] {log_msg}")
+    u["combat_log"] = u["combat_log"][:5]
 
 # --- 5. INTERFACE ---
 st.set_page_config(page_title="LEVEL CRUSH", layout="wide")
 
-# HEADER
 curr_l_req, title_name, title_color = get_current_title_info(u['level'])
-# Effet spécial pour LEVEL CRUSHER (Noir avec lueur Turquoise)
 glow_color = "#00FFCC" if title_name == "LEVEL CRUSHER" else title_color
+text_color = "black" if title_name == "Starter" else "white"
+
 st.markdown(f"""
     <div style="text-align:center; padding:10px;">
         <span style="color:white; font-size:1.1em; vertical-align:middle;">NIV.{u['level']}</span>
         <div style="display:inline-block; margin-left:12px; padding:4px 18px; border:2px solid {glow_color}; 
                     border-radius:20px; box-shadow: 0 0 12px {glow_color}; background: {title_color};">
-            <b style="color:{'#00FFCC' if title_name == 'LEVEL CRUSHER' else 'white' if title_color == '#000000' else 'white'}; font-size:1.3em; text-transform:uppercase; letter-spacing:1px;">{title_name}</b>
+            <b style="color:{text_color if title_name != 'LEVEL CRUSHER' else '#00FFCC'}; font-size:1.3em; text-transform:uppercase; letter-spacing:1px;">{title_name}</b>
         </div>
     </div>
 """, unsafe_allow_html=True)
 
 tabs = st.tabs(["⚔️ Quêtes", "📊 Statistiques", "🧩 Système", "⚙️ Configuration"])
 
-# --- TAB 1 : QUÊTES & REGISTRE ---
 with tabs[0]:
-    req = get_xp_required(u['level'])
-    st.progress(min(max(u['xp']/req, 0.0), 1.0))
-    st.write(f"XP : **{u['xp']} / {req}**")
+    st.progress(min(max(u['xp']/get_xp_required(u['level']), 0.0), 1.0))
+    st.write(f"XP : **{u['xp']} / {get_xp_required(u['level'])}**")
     
     with st.expander("📜 Registre des Rangs", expanded=False):
-        items_html = ""
-        for l_req, t_name, t_color in TITLES_DATA:
-            is_unlocked = u['level'] >= l_req
-            is_current = curr_l_req == l_req
-            disp_name = t_name if is_unlocked else "???"
-            dot_color = t_color if is_unlocked else "#333"
-            opacity = "1" if is_unlocked else "0.3"
-            pulse_class = "pulse-active" if is_current else ""
-            border_style = f"border: 2px solid {'white' if is_current else 'transparent'};"
-            
-            items_html += f"""
-                <div style="min-width: 95px; text-align: center; opacity: {opacity}; margin-right: 15px;">
-                    <div class="dot {pulse_class}" style="width: 14px; height: 14px; background: {dot_color}; border-radius: 50%; margin: 0 auto; {border_style}"></div>
-                    <p style="font-size: 11px; color: {'#00FFCC' if disp_name == 'LEVEL CRUSHER' else dot_color if is_unlocked else '#666'}; margin-top: 8px; font-weight: bold; font-family: sans-serif; white-space: nowrap;">{disp_name}</p>
-                    <p style="font-size: 9px; color: #666; font-family: sans-serif;">Niv.{l_req}</p>
-                </div>
-            """
-
-        timeline_code = f"""
-            <style>
-            body {{ background-color: transparent; margin: 0; overflow: hidden; }}
-            @keyframes pulse-anim {{
-                0% {{ box-shadow: 0 0 0 0 {glow_color}77; }}
-                70% {{ box-shadow: 0 0 0 8px {glow_color}00; }}
-                100% {{ box-shadow: 0 0 0 0 {glow_color}00; }}
-            }}
-            .pulse-active {{ animation: pulse-anim 2s infinite; }}
-            .scroll-wrapper {{
-                display: flex; 
-                overflow-x: auto; 
-                padding: 20px 5px;
-                scrollbar-width: thin;
-                scrollbar-color: #444 transparent;
-            }}
-            .scroll-wrapper::-webkit-scrollbar {{ height: 4px; }}
-            .scroll-wrapper::-webkit-scrollbar-thumb {{ background: #444; border-radius: 10px; }}
-            </style>
-            <div class="scroll-wrapper">
-                {items_html}
-            </div>
-        """
-        components.html(timeline_code, height=110)
+        items_html = "".join([f'<div style="min-width:90px;text-align:center;opacity:{"1" if u["level"]>=l else "0.4"};margin-right:15px;"><div class="dot {"pulse-active" if curr_l_req==l else ""}" style="width:14px;height:14px;background:{"#333" if u["level"]<l else c};border-radius:50%;margin:0 auto;border:2px solid {"white" if curr_l_req==l else "transparent"};"></div><p style="font-size:11px;color:{"#333" if u["level"]<l else c};margin-top:8px;font-weight:bold;font-family:sans-serif;">{n if u["level"]>=l else "???"}</p><p style="font-size:9px;color:#666;font-family:sans-serif;">Niv.{l}</p></div>' for l,n,c in TITLES_DATA])
+        components.html(f'<style>body{{background:transparent;margin:0;}}@keyframes pulse-anim{{0%{{box-shadow:0 0 0 0 {title_color}77;}}70%{{box-shadow:0 0 0 8px {title_color}00;}}100%{{box-shadow:0 0 0 0 {title_color}00;}}}} .pulse-active{{animation:pulse-anim 2s infinite;}} .scroll{{display:flex;overflow-x:auto;padding:20px 5px;scrollbar-width:thin;}}.scroll::-webkit-scrollbar{{height:4px;}}</style><div class="scroll">{items_html}</div>', height=110)
 
     st.divider()
     idx = 0
     for q_p in ["Quotidiennes", "Hebdomadaires", "Mensuelles", "Trimestrielles", "Annuelles"]:
         tasks = u["task_lists"].get(q_p, [])
         if tasks:
-            cap = get_capacity_for_period(u['level'], q_p)
-            with st.expander(f"{q_p} ({len(tasks)}/{cap})", expanded=True):
+            with st.expander(f"{q_p} ({len(tasks)}/{get_capacity_for_period(u['level'], q_p)})", expanded=True):
                 for task in tasks:
                     done = task in u["completed_quests"]
                     c = st.columns([2, 1, 0.5, 0.5] if u['mode'] == "Exalté" else [2, 1, 1])
-                    c[0].write(f"{'✅' if done else '🔳'} {task}")
+                    c[0].write(f"{'✅' if done else '🔳'} {task} <small style='color:#666'>({u['task_stat_links'].get(task, 'N/A')})</small>", unsafe_allow_html=True)
                     if not done:
-                        m_d = {"Quotidiennes":3, "Hebdomadaires":5, "Mensuelles":7, "Trimestrielles":9, "Annuelles":11}[q_p]
-                        diff = c[1].select_slider("Poids", options=list(range(1, m_d+1)), value=u["task_diffs"].get(task, 1), key=f"s_{idx}", label_visibility="collapsed")
+                        diff = c[1].select_slider("Poids", options=list(range(1, 12)), value=u["task_diffs"].get(task, 1), key=f"s_{idx}", label_visibility="collapsed")
                         u["task_diffs"][task] = diff
                         if c[2].button("✔️", key=f"v_{idx}"):
-                            process_xp_change(100 * diff, "fait"); u["completed_quests"].append(task); save_data(u); st.rerun()
+                            process_xp_change(100 * diff, task, "fait"); u["completed_quests"].append(task); save_data(u); st.rerun()
                         if u['mode'] == "Exalté" and len(c) > 3:
                             if c[3].button("❌", key=f"x_{idx}"):
-                                process_xp_change(-(100 * diff), "rouge"); save_data(u); st.rerun()
+                                process_xp_change(-(100 * diff), task, "rouge"); save_data(u); st.rerun()
                     idx += 1
+    
+    st.subheader("🛡️ Journal de Combat")
+    for log in u["combat_log"]:
+        st.caption(log)
 
-# --- TABS STATS, SYSTEM, CONFIG ---
 with tabs[1]:
     c1, c2 = st.columns([1.5, 1])
     with c1:
-        st.markdown("<h3 style='text-align: center; margin-bottom: 0px;'>📈 Progression</h3>", unsafe_allow_html=True)
+        st.markdown("<h3 style='text-align:center;'>📈 Progression</h3>", unsafe_allow_html=True)
         if u["xp_history"]:
             df = pd.DataFrame(u["xp_history"]); df['date'] = pd.to_datetime(df['date'])
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=df['date'], y=df['xp_cumul'], mode='lines', line=dict(color='#00FFCC', width=2), name="XP"))
-            for s, col, lab in [('fait', '#00FFCC', 'Succès'), ('rouge', 'red', 'Échec')]:
-                sub = df[df['status'] == s]
-                if not sub.empty: fig.add_trace(go.Scatter(x=sub['date'], y=sub['xp_cumul'], mode='markers', marker=dict(color=col, size=8), name=lab))
-            fig.update_layout(template="plotly_dark", height=400, margin=dict(l=10, r=10, t=10, b=10), showlegend=True, legend=dict(orientation="h", y=1.02, x=1))
+            fig = go.Figure(go.Scatter(x=df['date'], y=df['xp_cumul'], mode='lines+markers', line=dict(color='#00FFCC'), name="XP"))
+            fig.update_layout(template="plotly_dark", height=400, margin=dict(l=10, r=10, t=10, b=10))
             st.plotly_chart(fig, use_container_width=True)
     with c2:
+        st.markdown("<h3 style='text-align:center;'>🕸️ Profil de Puissance</h3>", unsafe_allow_html=True)
         fig_r = go.Figure(data=go.Scatterpolar(r=list(u['stats'].values()), theta=list(u['stats'].keys()), fill='toself', line_color='#00FFCC'))
-        fig_r.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, max(u['stats'].values())+10])), template="plotly_dark", height=400)
+        fig_r.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, max(u['stats'].values())+5])), template="plotly_dark", height=400)
         st.plotly_chart(fig_r, use_container_width=True)
-
-with tabs[2]:
-    st.subheader("🧩 Architecture")
-    st.markdown(f"**Quotidiennes** : {get_capacity_for_period(u['level'], 'Quotidiennes')} slots | **Autres** : 1 slot.")
 
 with tabs[3]:
     new_m = st.radio("Difficulté", ["Séide", "Exalté"], index=["Séide", "Exalté"].index(u["mode"]))
     if new_m != u["mode"]: u["mode"] = new_m; save_data(u); st.rerun()
     st.divider()
-    cp, ct, cb = st.columns([1, 2, 1])
+    cp, ct, cs, cb = st.columns([1, 1.5, 1, 0.5])
     sel_p = cp.selectbox("Période", ["Quotidiennes", "Hebdomadaires", "Mensuelles", "Trimestrielles", "Annuelles"])
-    t_add = ct.text_input("Ajouter tâche")
-    if cb.button("Ajouter"):
+    t_add = ct.text_input("Tâche")
+    stat_link = cs.selectbox("Statistique", ["Physique", "Connaissances", "Autonomie", "Mental"])
+    if cb.button("➕"):
         if len(u["task_lists"].get(sel_p, [])) < get_capacity_for_period(u['level'], sel_p):
-            if t_add and t_add not in [t for sub in u["task_lists"].values() for t in sub]:
-                u["task_lists"][sel_p].append(t_add); save_data(u); st.rerun()
+            if t_add and t_add not in u["task_stat_links"]:
+                u["task_lists"][sel_p].append(t_add)
+                u["task_stat_links"][t_add] = stat_link
+                save_data(u); st.rerun()
     for p, tasks in u["task_lists"].items():
         if tasks:
             st.write(f"**{p}**")
             for i, t in enumerate(tasks):
                 cx1, cx2 = st.columns([4, 1])
-                cx1.write(f"• {t}")
-                if cx2.button("❌", key=f"del_{p}_{i}"): u["task_lists"][p].remove(t); save_data(u); st.rerun()
+                cx1.write(f"• {t} ({u['task_stat_links'].get(t)})")
+                if cx2.button("❌", key=f"del_{p}_{i}"): 
+                    u["task_lists"][p].remove(t); u["task_stat_links"].pop(t, None); save_data(u); st.rerun()
 
-# --- SIDEBAR ---
 with st.sidebar:
     st.header("⏳ Temps")
     if st.button("⏭️ SAUTER UN JOUR"):
-        if u['mode'] == "Exalté": process_xp_change(-(len(u["task_lists"].get("Quotidiennes", [])) * 100), "rouge")
+        if u['mode'] == "Exalté": process_xp_change(-(len(u["task_lists"].get("Quotidiennes", [])) * 100), "Saut de jour", "rouge")
         u["internal_date"] = (datetime.strptime(u["internal_date"], "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
         u["completed_quests"] = [q for q in u["completed_quests"] if q not in u["task_lists"].get("Quotidiennes", [])]
         save_data(u); st.rerun()
@@ -223,4 +196,4 @@ with st.sidebar:
             u["completed_quests"] = [q for q in u["completed_quests"] if q not in u["task_lists"].get(p, [])]
             save_data(u); st.rerun()
     st.divider()
-    if st.button("💀 HARD RESET"): save_data({"level": 1, "xp": 0, "mode": "Séide", "stats": {"Physique": 10, "Connaissances": 10, "Autonomie": 10, "Mental": 10}, "completed_quests": [], "task_lists": {"Quotidiennes": [], "Hebdomadaires": [], "Mensuelles": [], "Trimestrielles": [], "Annuelles": []}, "task_diffs": {}, "xp_history": [], "internal_date": "2026-01-03"}); st.rerun()
+    if st.button("💀 HARD RESET"): save_data({"level": 1, "xp": 0, "mode": "Séide", "stats": {"Physique": 10, "Connaissances": 10, "Autonomie": 10, "Mental": 10}, "completed_quests": [], "task_lists": {"Quotidiennes": [], "Hebdomadaires": [], "Mensuelles": [], "Trimestrielles": [], "Annuelles": []}, "task_diffs": {}, "task_stat_links": {}, "combat_log": [], "xp_history": [], "internal_date": "2026-01-03"}); st.rerun()
