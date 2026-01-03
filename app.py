@@ -15,7 +15,6 @@ except Exception as e:
 
 # --- 2. LOGIQUE DE PROGRESSION ---
 def get_xp_required(lvl):
-    """Calcul selon ta courbe : Coef 200 (L<5) | Coef 25 (L<100) | x10 (L=100)"""
     next_lvl = lvl + 1
     if lvl < 5:
         return int(200 * (next_lvl**1.2))
@@ -25,34 +24,10 @@ def get_xp_required(lvl):
         return int(int(25 * (100**1.2)) * 10)
 
 def get_total_cumulated_xp(lvl, current_xp):
-    """Calcule l'XP totale du niveau 1 jusqu'à la progression actuelle"""
     total = 0
     for l in range(1, lvl):
         total += get_xp_required(l)
     return total + current_xp
-
-def generate_plausible_history():
-    """Simule une progression réaliste basée sur l'XP cumulée"""
-    history = []
-    curr_date = datetime(2025, 6, 1)
-    temp_lvl = 1
-    temp_xp = 0
-    while curr_date <= datetime.now():
-        chance = random.random()
-        status = "rouge" if chance < 0.2 else ("orange" if chance < 0.4 else "fait")
-        gain = random.randint(100, 400) if status != "rouge" else 0
-        temp_xp += gain
-        req = get_xp_required(temp_lvl)
-        if temp_xp >= req and temp_lvl < 100:
-            temp_xp -= req
-            temp_lvl += 1
-        history.append({
-            "date": curr_date.strftime("%Y-%m-%d"),
-            "xp_cumul": get_total_cumulated_xp(temp_lvl, temp_xp),
-            "status": status
-        })
-        curr_date += timedelta(days=2)
-    return history
 
 # --- 3. GESTION DES DONNÉES ---
 MY_ID = "shadow_monarch_01" 
@@ -63,13 +38,12 @@ def load_data():
         if response.data:
             data = response.data[0]['data']
             if isinstance(data, str): data = json.loads(data)
-            fields = {"level": 1, "xp": 0, "mode": "Séide", "stats": {"Physique": 10, "Connaissances": 10, "Autonomie": 10, "Mental": 10}, "completed_quests": [], "task_diffs": {}, "xp_history": [], "task_lists": {"Quotidiennes": [], "Hebdomadaires": [], "Mensuelles": [], "Trimestrielles": [], "Annuelles": []}}
+            fields = {"level": 1, "xp": 0, "mode": "Séide", "stats": {"Physique": 10, "Connaissances": 10, "Autonomie": 10, "Mental": 10}, "completed_quests": [], "task_lists": {"Quotidiennes": [], "Hebdomadaires": [], "Mensuelles": [], "Trimestrielles": [], "Annuelles": []}, "xp_history": []}
             for k, v in fields.items():
                 if k not in data: data[k] = v
-            if not data["xp_history"]: data["xp_history"] = generate_plausible_history()
             return data
     except: pass
-    return {"level": 1, "xp": 0, "mode": "Séide", "xp_history": generate_plausible_history(), "stats": {"Physique": 10, "Connaissances": 10, "Autonomie": 10, "Mental": 10}, "completed_quests": [], "task_lists": {"Quotidiennes": [], "Hebdomadaires": [], "Mensuelles": [], "Trimestrielles": [], "Annuelles": []}}
+    return {"level": 1, "xp": 0, "mode": "Séide", "xp_history": [], "stats": {"Physique": 10, "Connaissances": 10, "Autonomie": 10, "Mental": 10}, "completed_quests": [], "task_lists": {"Quotidiennes": [], "Hebdomadaires": [], "Mensuelles": [], "Trimestrielles": [], "Annuelles": []}}
 
 def save_data(data):
     supabase.table('profiles').upsert({"user_id": MY_ID, "data": data}).execute()
@@ -94,8 +68,14 @@ def process_xp_change(amount):
             st.toast("⚠️ LEVEL DOWN...", icon="📉")
     if u['xp'] < 0: u['xp'] = 0
 
-# --- 4. CONFIGURATION TITRES ---
-TITLES_MAP = {1: "Rang E", 3: "Néophyte", 6: "Aspirant", 10: "Soldat de Plomb", 14: "Gardien de Fer", 19: "Traqueur Silencieux", 24: "Vanguard", 30: "Chevalier d'Acier", 36: "Briseur de Chaînes", 43: "Architecte du Destin", 50: "Légat du Système", 58: "Commandeur", 66: "Seigneur de Guerre", 75: "Entité Transcendante", 84: "Demi-Dieu", 93: "Souverain", 100: "LEVEL CRUSHER"}
+# --- 4. CONFIGURATION TITRES (COMPLETS) ---
+TITLES_MAP = {
+    1: "Rang E", 3: "Néophyte", 6: "Aspirant", 10: "Soldat de Plomb", 
+    14: "Gardien de Fer", 19: "Traqueur Silencieux", 24: "Vanguard", 30: "Chevalier d'Acier", 
+    36: "Briseur de Chaînes", 43: "Architecte du Destin", 50: "Légat du Système", 
+    58: "Commandeur", 66: "Seigneur de Guerre", 75: "Entité Transcendante", 
+    84: "Demi-Dieu", 93: "Souverain", 100: "LEVEL CRUSHER"
+}
 
 def get_current_title(lvl):
     unlocked = [t for l, t in TITLES_MAP.items() if l <= lvl]
@@ -119,16 +99,16 @@ with tabs[0]:
         tasks = u["task_lists"].get(q_p, [])
         if tasks:
             with st.expander(f"{q_p} ({len(tasks)})", expanded=True):
-                for t in tasks:
-                    done = t in u["completed_quests"]
+                for task in tasks:
+                    done = task in u["completed_quests"]
                     col_spec = [2, 1, 0.5, 0.5] if u['mode'] == "Exalté" else [2, 1, 1]
                     cols = st.columns(col_spec)
-                    cols[0].write(f"{'✅' if done else '🔳'} {t}")
+                    cols[0].write(f"{'✅' if done else '🔳'} {task}")
                     if not done:
                         diff = cols[1].select_slider("Diff", options=list(range(1, m_d+1)), key=f"s_{idx}", label_visibility="collapsed")
                         if cols[2].button("✔️", key=f"v_{idx}"):
                             process_xp_change(100 * diff)
-                            u["completed_quests"].append(t)
+                            u["completed_quests"].append(task)
                             u["xp_history"].append({"date": datetime.now().strftime("%Y-%m-%d"), "xp_cumul": get_total_cumulated_xp(u['level'], u['xp']), "status":"fait"})
                             save_data(u); st.rerun()
                         if u['mode'] == "Exalté" and len(cols) > 3:
@@ -146,13 +126,15 @@ with tabs[1]:
         df = pd.DataFrame(u["xp_history"])
         if not df.empty:
             df['date'] = pd.to_datetime(df['date'])
+            # Sécurité si xp_cumul manque dans les vieux logs
+            y_col = 'xp_cumul' if 'xp_cumul' in df.columns else 'xp'
             fig = go.Figure()
-            fig.add_trace(go.Scatter(x=df['date'], y=df['xp_cumul'], mode='lines', line=dict(color='#00FFCC', width=2), name="XP Cumulée"))
+            fig.add_trace(go.Scatter(x=df['date'], y=df[y_col], mode='lines', line=dict(color='#00FFCC', width=2), name="XP Cumulée"))
             for s, color, lab in [('rouge','red', 'Échec'), ('fait','#00FFCC', 'Succès')]:
                 sub = df[df['status']==s]
                 if not sub.empty:
-                    fig.add_trace(go.Scatter(x=sub['date'], y=sub['xp_cumul'], mode='markers', marker=dict(color=color, size=6), name=lab))
-            fig.update_layout(template="plotly_dark", height=400, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+                    fig.add_trace(go.Scatter(x=sub['date'], y=sub[y_col], mode='markers', marker=dict(color=color, size=6), name=lab))
+            fig.update_layout(template="plotly_dark", height=400, showlegend=True, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
             st.plotly_chart(fig, use_container_width=True)
     with c_rd:
         st.subheader("🕸️ Profil de Puissance")
@@ -171,19 +153,17 @@ with tabs[2]:
 
 # --- TAB CONFIGURATION ---
 with tabs[4]:
-    new_m = st.radio("Difficulté", ["Séide", "Exalté"], index=["Séide", "Exalté"].index(u["mode"]), help="Séide: Pas de pénalité | Exalté: Perte XP/LVL possible.")
+    h_msg = "Séide : Aucune pénalité si tâches non accomplies. | Exalté : Perte de niveau et d'XP possible."
+    new_m = st.radio("Difficulté", ["Séide", "Exalté"], index=["Séide", "Exalté"].index(u["mode"]), help=h_msg)
     if new_m != u["mode"]: u["mode"] = new_m; save_data(u); st.rerun()
     st.divider()
     cp, ct, cb = st.columns([1, 2, 1])
     sel_p = cp.selectbox("Période", list(u["task_lists"].keys()))
-    name_t = ct.text_input("Tâche")
+    name_t = ct.text_input("Ajouter une tâche")
     if cb.button("Ajouter"):
-        # Vérification d'unicité sur toutes les listes
         all_tasks = [t for sublist in u["task_lists"].values() for t in sublist]
-        if name_t in all_tasks:
-            st.error("Cette tâche existe déjà !")
-        elif name_t:
-            u["task_lists"][sel_p].append(name_t); save_data(u); st.rerun()
+        if name_t in all_tasks: st.error("Tâche déjà existante !")
+        elif name_t: u["task_lists"][sel_p].append(name_t); save_data(u); st.rerun()
     for p, tasks in u["task_lists"].items():
         if tasks:
             st.write(f"**{p}**")
@@ -193,7 +173,7 @@ with tabs[4]:
                 if cx2.button("❌", key=f"del_{p}_{i}"):
                     u["task_lists"][p].remove(t); save_data(u); st.rerun()
 
-# --- SIDEBAR ---
+# --- SIDEBAR (RESETS & TEMPS) ---
 with st.sidebar:
     st.header("⏳ Temps")
     if st.button("⏭️ SAUTER UN JOUR", use_container_width=True):
