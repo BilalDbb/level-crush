@@ -1,7 +1,6 @@
 import streamlit as st
 import json
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 import random
 from datetime import datetime, timedelta
@@ -18,7 +17,6 @@ except Exception as e:
 MY_ID = "shadow_monarch_01" 
 
 def generate_mock_history():
-    """Génère un historique simulé depuis Juin 2025 pour le visuel"""
     history = []
     start_date = datetime(2025, 6, 1)
     end_date = datetime.now()
@@ -44,10 +42,11 @@ def load_data():
         if response.data:
             data = response.data[0]['data']
             if isinstance(data, str): data = json.loads(data)
-            # Init des nouveaux champs si absents
             if "xp_history" not in data or len(data["xp_history"]) < 5: data["xp_history"] = generate_mock_history()
             if "stats" not in data: data["stats"] = {"Physique": 20, "Connaissances": 35, "Autonomie": 15, "Mental": 25}
             if "mode" not in data: data["mode"] = "Nomade"
+            if "level" not in data: data["level"] = 1
+            if "xp" not in data: data["xp"] = 0
             return data
     except: pass
     return {"level": 1, "xp": 0, "mode": "Nomade", "xp_history": generate_mock_history(), "stats": {"Physique": 10, "Connaissances": 10, "Autonomie": 10, "Mental": 10}, "completed_quests": [], "task_lists": {"Quotidiennes": [], "Hebdomadaires": [], "Mensuelles": [], "Trimestrielles": [], "Annuelles": []}}
@@ -68,7 +67,7 @@ st.set_page_config(page_title="LEVEL CRUSH", page_icon="⚡", layout="wide")
 
 st.markdown(f"<h1 style='text-align: center; color: #00FFCC;'>⚡ NIV.{user['level']} | {TITLES_MAP.get(user['level'], 'Inconnu')}</h1>", unsafe_allow_html=True)
 
-tab_quests, tab_stats, tab_config = st.tabs(["⚔️ Quêtes", "📊 États & Radar", "⚙️ Config"])
+tab_quests, tab_stats, tab_config = st.tabs(["⚔️ Quêtes", "🏆 Titres & Statistiques", "⚙️ Configuration"])
 
 # --- ONGLET 1 : QUÊTES ---
 with tab_quests:
@@ -83,71 +82,73 @@ with tab_quests:
                         t_id = f"{q_type}_{t}"
                         col1, col2, col3 = st.columns([2, 1, 1])
                         col1.write(f"🔳 {t}")
-                        w = col2.select_slider("Poids", options=list(range(1, max_w+1)), key=f"w_{t_id}")
+                        w = col2.select_slider("Difficulté", options=list(range(1, max_w+1)), key=f"w_{t_id}", help="Plus la difficulté est haute, plus l'XP et les Stats augmentent.")
                         if col3.button("Valider", key=f"btn_{t_id}"):
-                            # Logique de gain XP simplifiée pour le test
                             user['xp'] += (100 * w)
                             save_data(user); st.rerun()
     with c_db:
         st.subheader("💾 JSON de Sauvegarde")
         st.json(user)
 
-# --- ONGLET 2 : ÉTATS (GRAPH XY + RADAR) ---
+# --- ONGLET 2 : TITRES & STATS ---
 with tab_stats:
     col_xy, col_radar = st.columns([2, 1])
-    
     with col_xy:
-        st.subheader("📈 Courbe de Puissance (Style OPM)")
+        st.subheader("📈 Progression")
         df = pd.DataFrame(user["xp_history"])
         df['date'] = pd.to_datetime(df['date'])
-        
         fig = go.Figure()
-        # Ligne principale néon
-        fig.add_trace(go.Scatter(x=df['date'], y=df['xp'], mode='lines', line=dict(color='#00FFCC', width=3), name='XP'))
-        
-        # Points de statut
-        for status, color, name in [('rouge', 'red', 'Jour Vide'), ('orange', 'orange', 'Partiel'), ('fait', 'rgba(0,0,0,0)', '')]:
+        fig.add_trace(go.Scatter(x=df['date'], y=df['xp'], mode='lines', line=dict(color='#00FFCC', width=3)))
+        for status, color in [('rouge', 'red'), ('orange', 'orange')]:
             subset = df[df['status'] == status]
-            if not subset.empty and status != 'fait':
-                fig.add_trace(go.Scatter(x=subset['date'], y=subset['xp'], mode='markers', marker=dict(color=color, size=7), name=name))
-        
-        # Points Level Up (Noir avec bordure néon)
+            if not subset.empty:
+                fig.add_trace(go.Scatter(x=subset['date'], y=subset['xp'], mode='markers', marker=dict(color=color, size=7), showlegend=False))
         lv_up = df[df['level_up'] == True]
-        fig.add_trace(go.Scatter(x=lv_up['date'], y=lv_up['xp'], mode='markers', marker=dict(color='black', size=12, line=dict(color='#00FFCC', width=2), symbol='circle'), name='LEVEL UP'))
-
-        fig.update_layout(template="plotly_dark", xaxis_title="Dates", yaxis_title="XP", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+        fig.add_trace(go.Scatter(x=lv_up['date'], y=lv_up['xp'], mode='markers', marker=dict(color='black', size=12, line=dict(color='#00FFCC', width=2)), showlegend=False))
+        fig.update_layout(template="plotly_dark", xaxis_title="Dates", yaxis_title="XP", showlegend=False, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
         st.plotly_chart(fig, use_container_width=True)
 
     with col_radar:
-        st.subheader("🕸️ Radar de Caractéristiques")
+        st.subheader("🕸️ Profil de Puissance")
         labels = list(user['stats'].keys())
         values = list(user['stats'].values())
-        
-        fig_radar = go.Figure(data=go.Scatterpolar(r=values, theta=labels, fill='toself', line_color='#00FFCC', fillcolor='rgba(0, 255, 204, 0.2)'))
-        fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, max(values)+10])), template="plotly_dark", showlegend=False)
+        fig_radar = go.Figure(data=go.Scatterpolar(r=values, theta=labels, fill='toself', line_color='#00FFCC'))
+        fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, max(values)+10])), template="plotly_dark", margin=dict(l=60, r=60, t=20, b=20))
         st.plotly_chart(fig_radar, use_container_width=True)
 
-# --- ONGLET 3 : CONFIG ---
+# --- ONGLET 3 : CONFIGURATION ---
 with tab_config:
     st.subheader("🎮 Paramètres & Modes")
-    help_modes = "Nomade : Tranquille | Séide : Perte XP si échec | Exalté : De-leveling possible."
-    user["mode"] = st.radio("Mode de jeu", ["Nomade", "Séide", "Exalté"], help=help_modes)
+    help_modes = {
+        "Nomade": "Mode libre. Aucune pénalité, tu progresses à ton rythme sans stress.",
+        "Séide": "Mode discipliné. Perte d'XP si les tâches ne sont pas faites, mais impossible de perdre un titre acquis.",
+        "Exalté": "Mode Hardcore. Perte d'XP massive et De-leveling actif. Tu peux perdre tes titres."
+    }
+    user["mode"] = st.radio("Mode de jeu", ["Nomade", "Séide", "Exalté"], help=help_modes[user.get("mode", "Nomade")])
     
     st.divider()
     st.subheader("⚙️ Gestionnaire de Quêtes")
-    cat = st.selectbox("Catégorie :", list(user["task_lists"].keys()))
-    new_task = st.text_input("Ajouter un objectif :")
-    if st.button("➕ Ajouter"):
-        if new_task: user["task_lists"][cat].append(new_task); save_data(user); st.rerun()
     
-    for t in user["task_lists"].get(cat, []):
-        cx1, cx2 = st.columns([4, 1])
-        cx1.write(f"• {t}")
-        if cx2.button("❌", key=f"del_{cat}_{t}"):
-            user["task_lists"][cat].remove(t); save_data(user); st.rerun()
+    # Ajout rapide
+    c_cat, c_in, c_bt = st.columns([1, 2, 1])
+    new_cat = c_cat.selectbox("Période :", list(user["task_lists"].keys()))
+    new_task = c_in.text_input("Nouvel objectif :")
+    if c_bt.button("➕ Ajouter", use_container_width=True):
+        if new_task: user["task_lists"][new_cat].append(new_task); save_data(user); st.rerun()
+
+    # Liste Globale
+    for cat, tasks in user["task_lists"].items():
+        if tasks:
+            st.markdown(f"**{cat}**")
+            for t in tasks:
+                cx1, cx2 = st.columns([4, 1])
+                cx1.write(f"• {t}")
+                if cx2.button("❌", key=f"del_{cat}_{t}"):
+                    user["task_lists"][cat].remove(t); save_data(user); st.rerun()
 
 with st.sidebar:
     st.header("⚙️ Système")
-    if st.button("📅 Reset Hebdo"):
-        user["completed_quests"] = [q for q in user["completed_quests"] if not q.startswith("Hebdomadaires")]
-        save_data(user); st.rerun()
+    for cat in user["task_lists"].keys():
+        if st.button(f"🔄 Reset {cat}"):
+            user["completed_quests"] = [q for q in user["completed_quests"] if not q.startswith(cat)]
+            save_data(user); st.rerun()
