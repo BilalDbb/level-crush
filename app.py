@@ -28,23 +28,27 @@ def get_total_cumulated_xp(lvl, current_xp):
 # --- 3. GESTION DES DONNÉES ---
 MY_ID = "shadow_monarch_01" 
 
+def get_default_data():
+    return {
+        "level": 1, "xp": 0, "mode": "Séide", 
+        "stats": {"Physique": 10, "Connaissances": 10, "Autonomie": 10, "Mental": 10},
+        "completed_quests": [], 
+        "task_lists": {"Quotidiennes": [], "Hebdomadaires": [], "Mensuelles": [], "Trimestrielles": [], "Annuelles": []},
+        "task_diffs": {}, "xp_history": [], "internal_date": "2026-01-03"
+    }
+
 def load_data():
     try:
         res = supabase.table('profiles').select('data').eq('user_id', MY_ID).execute()
         if res.data:
             d = res.data[0]['data']
             if isinstance(d, str): d = json.loads(d)
-            f = {
-                "level": 1, "xp": 0, "mode": "Séide", 
-                "stats": {"Physique": 10, "Connaissances": 10, "Autonomie": 10, "Mental": 10},
-                "completed_quests": [], "task_lists": {"Quotidiennes": [], "Hebdomadaires": [], "Mensuelles": [], "Trimestrielles": [], "Annuelles": []},
-                "task_diffs": {}, "xp_history": [], "internal_date": "2026-01-03"
-            }
+            f = get_default_data()
             for k, v in f.items():
                 if k not in d: d[k] = v
             return d
     except: pass
-    return {"level": 1, "xp": 0, "mode": "Séide", "stats": {"Physique": 10, "Connaissances": 10, "Autonomie": 10, "Mental": 10}, "completed_quests": [], "task_lists": {"Quotidiennes": [], "Hebdomadaires": [], "Mensuelles": [], "Trimestrielles": [], "Annuelles": []}, "task_diffs": {}, "xp_history": [], "internal_date": "2026-01-03"}
+    return get_default_data()
 
 def save_data(data):
     supabase.table('profiles').upsert({"user_id": MY_ID, "data": data}).execute()
@@ -71,11 +75,10 @@ def process_xp_change(amount, status="fait"):
     })
 
 # --- 4. INTERFACE ---
-TITLES = {1: "Rang E", 3: "Néophyte", 6: "Aspirant", 10: "Soldat de Plomb", 30: "Chevalier d'Acier", 50: "Légat du Système", 100: "LEVEL CRUSHER"}
-st.set_page_config(page_title="LEVEL CRUSH", layout="wide")
+TITLES = {1: "Rang E", 3: "Néophyte", 6: "Aspirant", 10: "Soldat de Plomb", 14: "Gardien de Fer", 19: "Traqueur Silencieux", 24: "Vanguard", 30: "Chevalier d'Acier", 36: "Briseur de Chaînes", 43: "Architecte du Destin", 50: "Légat du Système", 58: "Commandeur", 66: "Seigneur de Guerre", 75: "Entité Transcendante", 84: "Demi-Dieu", 93: "Souverain", 100: "LEVEL CRUSHER"}
 
+st.set_page_config(page_title="LEVEL CRUSH", layout="wide")
 st.markdown(f"<h1 style='text-align:center; color:#00FFCC;'>⚡ NIV.{u['level']} | {TITLES.get(max([l for l in TITLES if l <= u['level']]), 'Inconnu')}</h1>", unsafe_allow_html=True)
-st.sidebar.info(f"📅 Date Interne : {u['internal_date']}")
 
 tabs = st.tabs(["⚔️ Quêtes", "📊 Statistiques", "🏆 Titres", "🧩 Système", "⚙️ Configuration"])
 
@@ -86,7 +89,9 @@ with tabs[0]:
     st.write(f"XP : **{u['xp']} / {req}**")
     st.divider()
     idx = 0
-    for q_p, m_d in {"Quotidiennes":3, "Hebdomadaires":5, "Mensuelles":7, "Trimestrielles":9, "Annuelles":11}.items():
+    # Ordre strict pour l'affichage
+    for q_p in ["Quotidiennes", "Hebdomadaires", "Mensuelles", "Trimestrielles", "Annuelles"]:
+        m_d = {"Quotidiennes":3, "Hebdomadaires":5, "Mensuelles":7, "Trimestrielles":9, "Annuelles":11}[q_p]
         tasks = u["task_lists"].get(q_p, [])
         if tasks:
             with st.expander(f"{q_p}", expanded=True):
@@ -108,7 +113,7 @@ with tabs[0]:
                                 save_data(u); st.rerun()
                     idx += 1
 
-# --- TAB 2 : STATISTIQUES (SÉCURISÉ) ---
+# --- TAB 2 : STATISTIQUES ---
 with tabs[1]:
     c1, c2 = st.columns([1.5, 1])
     with c1:
@@ -116,16 +121,15 @@ with tabs[1]:
         try:
             if u["xp_history"]:
                 df = pd.DataFrame(u["xp_history"])
-                if not df.empty and 'xp_cumul' in df.columns:
-                    df['date'] = pd.to_datetime(df['date'])
-                    fig = go.Figure(go.Scatter(x=df['date'], y=df['xp_cumul'], mode='lines+markers', line=dict(color='#00FFCC')))
-                    fig.update_layout(template="plotly_dark", height=400, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-                    st.plotly_chart(fig, use_container_width=True)
-                else: st.info("Validez une tâche pour voir la courbe.")
-            else: st.info("Historique vide.")
-        except Exception as e: st.warning("Données historiques incompatibles. Utilisez HARD RESET.")
+                df['date'] = pd.to_datetime(df['date'])
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=df['date'], y=df['xp_cumul'], mode='lines+markers', line=dict(color='#00FFCC'), name="XP Cumulée"))
+                fig.update_layout(template="plotly_dark", height=400, showlegend=True, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+                st.plotly_chart(fig, use_container_width=True)
+            else: st.info("Aucune donnée disponible.")
+        except: st.warning("Données graphiques corrompues. Hard Reset conseillé.")
     with c2:
-        st.subheader("🕸️ Profil")
+        st.subheader("🕸️ Profil de Puissance")
         fig_r = go.Figure(data=go.Scatterpolar(r=list(u['stats'].values()), theta=list(u['stats'].keys()), fill='toself', line_color='#00FFCC'))
         fig_r.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, max(u['stats'].values())+10])), template="plotly_dark")
         st.plotly_chart(fig_r, use_container_width=True)
@@ -140,9 +144,15 @@ with tabs[2]:
 
 # --- TAB 4 : SYSTÈME ---
 with tabs[3]:
-    st.subheader("🧩 Architecture")
-    st.write("**Séide** : Normal. | **Exalté** : Hardcore (Pénalité & Level Down).")
-    st.write("**Difficulté** : Gain = 100 XP x Poids.")
+    st.subheader("🧩 Architecture du Système")
+    st.markdown("""
+    **⚖️ Fonctionnement de la Difficulté**
+    Le curseur multiplie vos gains d'XP et de Statistiques. 
+    
+    **🎮 Modes de Jeu**
+    - **Séide** : Pas de pénalité. Progression sécurisée.
+    - **Exalté** : Perte d'XP et de niveau possible sur les Quêtes Quotidiennes.
+    """)
 
 # --- TAB 5 : CONFIGURATION ---
 with tabs[4]:
@@ -150,12 +160,13 @@ with tabs[4]:
     if new_m != u["mode"]: u["mode"] = new_m; save_data(u); st.rerun()
     st.divider()
     cp, ct, cb = st.columns([1, 2, 1])
-    sel_p = cp.selectbox("Période", list(u["task_lists"].keys()))
-    t_add = ct.text_input("Ajouter tâche")
+    sel_p = cp.selectbox("Période", ["Quotidiennes", "Hebdomadaires", "Mensuelles", "Trimestrielles", "Annuelles"])
+    t_add = ct.text_input("Ajouter une tâche")
     if cb.button("Ajouter"):
         all_t = [t for sub in u["task_lists"].values() for t in sub]
         if t_add not in all_t and t_add: u["task_lists"][sel_p].append(t_add); save_data(u); st.rerun()
-    for p, tasks in u["task_lists"].items():
+    for p in ["Quotidiennes", "Hebdomadaires", "Mensuelles", "Trimestrielles", "Annuelles"]:
+        tasks = u["task_lists"].get(p, [])
         if tasks:
             st.write(f"**{p}**")
             for i, t in enumerate(tasks):
@@ -164,7 +175,7 @@ with tabs[4]:
                 if cx2.button("❌", key=f"del_{p}_{i}"):
                     u["task_lists"][p].remove(t); save_data(u); st.rerun()
 
-# --- SIDEBAR (CONTRÔLE TOTAL) ---
+# --- SIDEBAR (CONTRÔLE) ---
 with st.sidebar:
     st.header("⏳ Temps")
     if st.button("⏭️ SAUTER UN JOUR"):
@@ -176,8 +187,8 @@ with st.sidebar:
         u["completed_quests"] = [q for q in u["completed_quests"] if q not in u["task_lists"].get("Quotidiennes", [])]
         save_data(u); st.rerun()
 
-    st.header("🔄 Réinitialisations")
-    for p in u["task_lists"].keys():
+    st.header("🔄 Resets")
+    for p in ["Quotidiennes", "Hebdomadaires", "Mensuelles", "Trimestrielles", "Annuelles"]:
         if st.button(f"Reset {p}", key=f"rs_{p}"):
             if p == "Quotidiennes":
                 curr_dt = datetime.strptime(u["internal_date"], "%Y-%m-%d")
@@ -186,6 +197,7 @@ with st.sidebar:
             save_data(u); st.rerun()
     
     st.divider()
-    if st.button("💀 HARD RESET"):
-        u = {"level": 1, "xp": 0, "mode": "Séide", "stats": {"Physique": 10, "Connaissances": 10, "Autonomie": 10, "Mental": 10}, "completed_quests": [], "task_lists": {"Quotidiennes": [], "Hebdomadaires": [], "Mensuelles": [], "Trimestrielles": [], "Annuelles": []}, "task_diffs": {}, "xp_history": [], "internal_date": "2026-01-03"}
-        save_data(u); st.rerun()
+    if st.button("💀 HARD RESET", type="primary"):
+        st.session_state.user_data = get_default_data()
+        save_data(st.session_state.user_data)
+        st.rerun()
