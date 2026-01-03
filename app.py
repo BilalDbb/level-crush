@@ -2,6 +2,7 @@ import streamlit as st
 import json
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 from datetime import datetime
 from supabase import create_client, Client
 
@@ -21,11 +22,11 @@ def load_data():
         if response.data and len(response.data) > 0:
             raw_data = response.data[0]['data']
             data = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
-            
             # Initialisations Sécurité
             if "mode" not in data: data["mode"] = "Nomade"
             if "xp_history" not in data: data["xp_history"] = []
-            if "task_lists" not in data: data["task_lists"] = {"Quotidiennes": [], "Hebdomadaires": [], "Mensuelles": [], "Trimestrielles": [], "Annuelles": []}
+            if "task_lists" not in data: 
+                data["task_lists"] = {"Quotidiennes": [], "Hebdomadaires": [], "Mensuelles": [], "Trimestrielles": [], "Annuelles": []}
             if "stats" not in data: data["stats"] = {"Physique": 0, "Connaissances": 0, "Autonomie": 0, "Mental": 0}
             if "completed_quests" not in data: data["completed_quests"] = []
             return data
@@ -40,7 +41,7 @@ if 'user_data' not in st.session_state:
 
 user = st.session_state.user_data
 
-# --- 3. LOGIQUE TITRES & XP ---
+# --- 3. LOGIQUE TITRES ---
 TITLES_MAP = {
     3: "Néophyte", 6: "Aspirant", 10: "Soldat de Plomb", 14: "Gardien de Fer", 
     19: "Traqueur Silencieux", 24: "Vanguard", 30: "Chevalier d'Acier", 
@@ -76,7 +77,7 @@ with tab_quests:
     for q_type, q_info in quest_configs.items():
         tasks = user["task_lists"].get(q_type, [])
         if tasks:
-            with st.expander(f"{q_type}"):
+            with st.expander(f"{q_type} ({len(tasks)})"):
                 for t_name in tasks:
                     t_id = f"{q_type}_{t_name}"
                     c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
@@ -90,8 +91,9 @@ with tab_quests:
                             user['xp'] += gain
                             user['stats'][s] += w
                             user["completed_quests"].append(t_id)
-                            # Historique XP pour graphique
-                            user["xp_history"].append({"date": datetime.now().strftime("%Y-%m-%d %H:%M"), "xp_total": user['xp'] + (user['level']*1000)}) # On ajoute un offset pour la courbe
+                            # Log XP pour graphique OPM style
+                            total_power = (user['level'] * 5000) + user['xp']
+                            user["xp_history"].append({"point": len(user["xp_history"]), "power": total_power})
                             while user['xp'] >= get_xp_needed(user['level']):
                                 user['xp'] -= get_xp_needed(user['level'])
                                 user['level'] += 1
@@ -99,59 +101,84 @@ with tab_quests:
                     else:
                         c4.button("Fait", key=t_id, disabled=True)
 
-# --- ONGLET 2 : ÉTATS & TITRES ---
+# --- ONGLET 2 : ÉTATS (STYLE OPM) ---
 with tab_stats:
-    c_left, c_right = st.columns([1, 1])
+    col_graph, col_badges = st.columns([1.5, 1])
     
-    with c_left:
-        st.subheader("📈 Évolution de l'XP")
+    with col_graph:
+        st.subheader("📈 ÉVOLUTION DE PUISSANCE")
         if user["xp_history"]:
             df = pd.DataFrame(user["xp_history"])
-            fig = px.line(df, x="date", y="xp_total", title="Courbe de Progression", markers=True)
-            fig.update_traces(line_color='#00FFCC')
+            # Création du graphique style Garou vs Saitama
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=df['point'], y=df['power'],
+                mode='lines+markers',
+                line=dict(color='#00FFCC', width=4),
+                fill='tozeroy',
+                fillcolor='rgba(0, 255, 204, 0.1)',
+                name="Ta Puissance"
+            ))
+            fig.update_layout(
+                template="plotly_dark",
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                xaxis=dict(showgrid=False, title="Actions"),
+                yaxis=dict(showgrid=True, gridcolor='#333', title="Niveau de Menace"),
+                font=dict(color="#00FFCC")
+            )
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("Valide ta première quête pour voir la courbe.")
+            st.info("Données en attente...")
 
         st.subheader("📊 Caractéristiques")
-        st.write(f"💪 **Physique** : {user['stats']['Physique']}")
-        st.write(f"🧠 **Connaissances** : {user['stats']['Connaissances']}")
-        st.write(f"🛠️ **Autonomie** : {user['stats']['Autonomie']}")
-        st.write(f"🧘 **Mental** : {user['stats']['Mental']}")
+        c_s1, c_s2, c_s3, c_s4 = st.columns(4)
+        c_s1.metric("Physique", user['stats']['Physique'])
+        c_s2.metric("Connaissances", user['stats']['Connaissances'])
+        c_s3.metric("Autonomie", user['stats']['Autonomie'])
+        c_s4.metric("Mental", user['stats']['Mental'])
 
-    with c_right:
+    with col_badges:
         st.subheader("🏆 Arbre des Titres")
-        # Affichage en grille/badges
-        cols = st.columns(3)
+        cols = st.columns(2)
         for i, (lvl_req, title) in enumerate(TITLES_MAP.items()):
-            with cols[i % 3]:
+            with cols[i % 2]:
                 unlocked = user['level'] >= lvl_req
-                color = "green" if unlocked else "gray"
                 st.markdown(f"""
-                <div style="border: 2px solid {color}; border-radius: 10px; padding: 10px; text-align: center; margin-bottom: 10px; background-color: {'#1E1E1E' if unlocked else '#0E0E0E'}">
-                    <span style="color: {color}; font-size: 0.8em;">Niv. {lvl_req}</span><br>
-                    <b style="color: {'white' if unlocked else '#555'}">{title if unlocked else '???'}</b>
-                </div>
+                    <div style="background:{'#1E1E1E' if unlocked else '#0A0A0A'}; border:2px solid {'#00FFCC' if unlocked else '#333'}; padding:10px; border-radius:10px; text-align:center; margin-bottom:10px;">
+                        <span style="color:{'#00FFCC' if unlocked else '#444'}; font-size:0.7em;">Niveau {lvl_req}</span><br>
+                        <b style="color:{'white' if unlocked else '#444'};">{title if unlocked else '???'}</b>
+                    </div>
                 """, unsafe_allow_html=True)
 
-# --- ONGLET 3 : CONFIG ---
+# --- ONGLET 3 : CONFIG (CORRIGÉ) ---
 with tab_config:
-    st.subheader("🎮 Paramètres du Système")
-    user["mode"] = st.radio("Mode de Jeu :", ["Nomade", "Séide", "Exalté"], index=["Nomade", "Séide", "Exalté"].index(user["mode"]))
-    if st.button("Enregistrer le Mode"):
-        save_data(user); st.success(f"Mode {user['mode']} activé.")
+    st.subheader("⚙️ Configuration")
+    user["mode"] = st.radio("Mode :", ["Nomade", "Séide", "Exalté"], index=["Nomade", "Séide", "Exalté"].index(user["mode"]))
+    if st.button("Sauvegarder Mode"):
+        save_data(user); st.success("Mode mis à jour.")
     
     st.divider()
-    st.subheader("⚙️ Gestionnaire de Quêtes")
-    cat = st.selectbox("Catégorie :", list(quest_configs.keys()))
+    cat = st.selectbox("Catégorie de quêtes :", list(quest_configs.keys()))
+    
+    # Ajout
     new_t = st.text_input(f"Nouvel objectif {cat} :")
     if st.button("Ajouter"):
-        if new_t and new_t not in user["task_lists"][cat]:
-            user["task_lists"][cat].append(new_t); save_data(user); st.rerun()
+        if new_t:
+            user["task_lists"][cat].append(new_t)
+            save_data(user); st.rerun()
+    
+    st.divider()
+    # LISTE DE SUPPRESSION (Rétablie)
+    st.write(f"Liste actuelle ({cat}) :")
+    for t in user["task_lists"].get(cat, []):
+        col_name, col_btn = st.columns([4, 1])
+        col_name.write(f"• {t}")
+        if col_btn.button("❌", key=f"del_{cat}_{t}"):
+            user["task_lists"][cat].remove(t)
+            save_data(user); st.rerun()
 
 with st.sidebar:
     if st.button("🔄 Nouvelle Journée"):
-        # Logique de sanction selon le mode
-        not_done = 0 # On pourrait compter les quêtes quotidiennes non faites ici
         user["completed_quests"] = [q for q in user["completed_quests"] if not q.startswith("Quotidiennes")]
         save_data(user); st.rerun()
