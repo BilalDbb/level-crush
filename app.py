@@ -16,49 +16,56 @@ except Exception as e:
 # --- 2. GESTION DES DONNÉES ---
 MY_ID = "shadow_monarch_01" 
 
-def generate_history():
-    """Génère un historique simulé depuis juin 2025"""
-    h = []
-    curr = datetime(2025, 6, 1)
-    xp_val = 0
-    while curr <= datetime.now():
-        chance = random.random()
-        status = "rouge" if chance < 0.2 else ("orange" if chance < 0.5 else "fait")
-        xp_val += random.randint(150, 600) if status != "rouge" else 0
-        h.append({
-            "date": curr.strftime("%Y-%m-%d"),
-            "xp": xp_val,
-            "status": status
+def generate_mock_history():
+    """Restauration de la logique SL-118"""
+    history = []
+    start_date = datetime(2025, 6, 1)
+    end_date = datetime.now()
+    current_xp = 0
+    current = start_date
+    while current <= end_date:
+        activity = random.random()
+        status = "rouge" if activity < 0.2 else ("orange" if activity < 0.5 else "fait")
+        xp_gain = random.randint(50, 400) if status != "rouge" else 0
+        current_xp += xp_gain
+        history.append({
+            "date": current.strftime("%Y-%m-%d"),
+            "xp": current_xp,
+            "status": status,
+            "level_up": True if random.random() > 0.96 else False
         })
-        curr += timedelta(days=2)
-    return h
+        current += timedelta(days=1)
+    return history
 
 def load_data():
     try:
-        res = supabase.table('profiles').select('data').eq('user_id', MY_ID).execute()
-        if res.data:
-            d = res.data[0]['data']
-            if isinstance(d, str): d = json.loads(d)
-            # Garanties structurelles
-            for k, v in {"level":1, "xp":0, "mode":"Nomade", "stats":{"Physique":10,"Connaissances":10,"Autonomie":10,"Mental":10}, "completed_quests":[], "task_lists":{"Quotidiennes":[],"Hebdomadaires":[],"Mensuelles":[],"Trimestrielles":[],"Annuelles":[]}, "task_diffs":{}, "xp_history":[]}.items():
-                if k not in d: d[k] = v
-            if not d["xp_history"]: d["xp_history"] = generate_history()
-            return d
+        response = supabase.table('profiles').select('data').eq('user_id', MY_ID).execute()
+        if response.data:
+            data = response.data[0]['data']
+            if isinstance(data, str): data = json.loads(data)
+            if "xp_history" not in data or len(data["xp_history"]) < 5: data["xp_history"] = generate_mock_history()
+            if "mode" not in data: data["mode"] = "Nomade"
+            return data
     except: pass
-    return {"level":1, "xp":0, "mode":"Nomade", "stats":{"Physique":10,"Connaissances":10,"Autonomie":10,"Mental":10}, "completed_quests":[], "task_lists":{"Quotidiennes":[],"Hebdomadaires":[],"Mensuelles":[],"Trimestrielles":[],"Annuelles":[]}, "task_diffs":{}, "xp_history":generate_history()}
+    return {"level": 1, "xp": 0, "mode": "Nomade", "xp_history": generate_mock_history(), "stats": {"Physique": 10, "Connaissances": 10, "Autonomie": 10, "Mental": 10}, "completed_quests": [], "task_lists": {"Quotidiennes": [], "Hebdomadaires": [], "Mensuelles": [], "Trimestrielles": [], "Annuelles": []}, "task_diffs": {}}
 
 def save_data(data):
     supabase.table('profiles').upsert({"user_id": MY_ID, "data": data}).execute()
+
+def update_mode():
+    """Fonction de sauvegarde automatique du mode"""
+    st.session_state.user_data["mode"] = st.session_state.new_mode
+    save_data(st.session_state.user_data)
+    st.toast(f"Mode {st.session_state.new_mode} activé !")
 
 if 'user_data' not in st.session_state:
     st.session_state.user_data = load_data()
 u = st.session_state.user_data
 
-# --- 3. LOGIQUE TITRES (Correction du palier) ---
+# --- 3. LOGIQUE TITRES ---
 TITLES = {1: "Soldat de Rang E", 3: "Néophyte", 6: "Aspirant", 10: "Soldat de Plomb", 14: "Gardien de Fer", 19: "Traqueur Silencieux", 24: "Vanguard", 30: "Chevalier d'Acier", 36: "Briseur de Chaînes", 43: "Architecte du Destin", 50: "Légat du Système", 58: "Commandeur", 66: "Seigneur de Guerre", 75: "Entité Transcendante", 84: "Demi-Dieu", 93: "Souverain de l'Abysse", 100: "LEVEL CRUSHER"}
 
 def get_current_title(lvl):
-    # Récupère le titre le plus haut débloqué
     unlocked = [t for l, t in TITLES.items() if l <= lvl]
     return unlocked[-1] if unlocked else "Inconnu"
 
@@ -68,30 +75,30 @@ st.markdown(f"<h1 style='text-align:center; color:#00FFCC;'>⚡ NIV.{u['level']}
 
 t1, t2, t3, t4, t5 = st.tabs(["⚔️ Quêtes", "📊 Statistiques", "🏆 Titres", "🧩 Système", "⚙️ Configuration"])
 
-# --- TAB 1 : QUÊTES ---
+# --- QUÊTES ---
 with t1:
     idx = 0
     for q_p, m_d in {"Quotidiennes":3, "Hebdomadaires":5, "Mensuelles":7, "Trimestrielles":9, "Annuelles":11}.items():
-        list_t = u["task_lists"].get(q_p, [])
-        if list_t:
-            with st.expander(f"{q_p} ({len(list_t)})", expanded=True):
-                for task in list_t:
-                    t_key = f"{q_p}_{task}"
-                    done = t_key in u["completed_quests"]
+        tasks = u["task_lists"].get(q_p, [])
+        if tasks:
+            with st.expander(f"{q_p} ({len(tasks)})", expanded=True):
+                for task in tasks:
+                    t_id = f"{q_p}_{task}"
+                    done = t_id in u["completed_quests"]
                     c1, c2, c3 = st.columns([2, 1, 1])
                     c1.write(f"{'✅' if done else '🔳'} {task}")
                     if not done:
-                        diff = c2.select_slider("Difficulté", options=list(range(1, m_d+1)), key=f"s_{idx}", label_visibility="collapsed")
+                        diff = c2.select_slider("Diff", options=list(range(1, m_d+1)), key=f"s_{idx}", label_visibility="collapsed")
                         if c3.button("Valider", key=f"b_{idx}"):
                             u['xp'] += (100 * diff)
-                            u["completed_quests"].append(t_key)
+                            u["completed_quests"].append(t_id)
                             u["xp_history"].append({"date": datetime.now().strftime("%Y-%m-%d"), "xp": (u['level']*1000)+u['xp'], "status":"fait"})
                             save_data(u); st.rerun()
                     else:
                         c3.button("Fait", key=f"f_{idx}", disabled=True)
                     idx += 1
 
-# --- TAB 2 : STATISTIQUES ---
+# --- STATISTIQUES (Restauration SL-118) ---
 with t2:
     c_xy, c_rd = st.columns([2, 1])
     with c_xy:
@@ -101,44 +108,45 @@ with t2:
             df['date'] = pd.to_datetime(df['date'])
             df = df.sort_values('date')
             fig = go.Figure()
-            # Courbe de puissance
             fig.add_trace(go.Scatter(x=df['date'], y=df['xp'], mode='lines', line=dict(color='#00FFCC', width=3)))
-            # Points de performance
-            for s, col, lab in [('rouge','red', 'Échec'), ('orange','orange', 'Partiel')]:
+            for s, color, lab in [('rouge','red', 'Échec'), ('orange','orange', 'Partiel')]:
                 sub = df[df['status']==s]
                 if not sub.empty:
-                    fig.add_trace(go.Scatter(x=sub['date'], y=sub['xp'], mode='markers', marker=dict(color=col, size=6), name=lab))
-            fig.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', showlegend=False)
+                    fig.add_trace(go.Scatter(x=sub['date'], y=sub['xp'], mode='markers', marker=dict(color=color, size=6), name=lab))
+            fig.update_layout(template="plotly_dark", xaxis_title="Dates", yaxis_title="XP", showlegend=False, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
             st.plotly_chart(fig, use_container_width=True)
     with c_rd:
-        st.subheader("🕸️ Profil")
+        st.subheader("🕸️ Profil de Puissance")
         fig_r = go.Figure(data=go.Scatterpolar(r=list(u['stats'].values()), theta=list(u['stats'].keys()), fill='toself', line_color='#00FFCC'))
-        fig_r.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, max(u['stats'].values())+10])), template="plotly_dark")
+        fig_r.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, max(u['stats'].values())+10])), template="plotly_dark", margin=dict(l=80, r=80, t=40, b=40))
         st.plotly_chart(fig_r, use_container_width=True)
 
-# --- TAB 3 : TITRES ---
+# --- TITRES ---
 with t3:
     st.subheader("🎖️ Arbre des Titres")
     cols = st.columns(4)
     for i, (l_req, title) in enumerate(TITLES.items()):
-        unlocked = u['level'] >= l_req
+        open_t = u['level'] >= l_req
         with cols[i % 4]:
-            st.markdown(f"<div style='background:{'#1E1E1E' if unlocked else '#0A0A0A'}; border:2px solid {'#00FFCC' if unlocked else '#333'}; padding:15px; border-radius:10px; text-align:center; margin-bottom:15px;'><span style='color:{'#00FFCC' if unlocked else '#444'}; font-size:0.8em;'>Niveau {l_req}</span><br><b style='color:{'white' if unlocked else '#444'};'>{title if unlocked else '???'}</b></div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='background:{'#1E1E1E' if open_t else '#0A0A0A'}; border:2px solid {'#00FFCC' if open_t else '#333'}; padding:15px; border-radius:10px; text-align:center; margin-bottom:15px;'><span style='color:{'#00FFCC' if open_t else '#444'}; font-size:0.8em;'>Niveau {l_req}</span><br><b style='color:{'white' if open_t else '#444'};'>{title if open_t else '???'}</b></div>", unsafe_allow_html=True)
 
-# --- TAB 4 : SYSTÈME ---
+# --- SYSTÈME ---
 with t4:
-    st.subheader("🧩 Règles du Système")
-    st.write("**Difficulté (Onglet Quêtes)** : Ajustez le curseur selon l'effort. Gains = 100 XP x Diff. Pénalité identique selon le mode choisi.")
-    st.write("**Déblocage** : Toutes les quêtes accessibles au Niv. 1. Capacité de tâches +1 tous les 10 niveaux.")
+    st.subheader("🧩 Règles")
+    st.write("**Difficulté (Onglet Quêtes)** : Gains = 100 XP x Diff. Pénalité miroir selon le mode.")
+    st.write("**Capacité** : Toutes quêtes dès Niv. 1. +1 tâche possible tous les 10 niveaux.")
 
-# --- TAB 5 : CONFIGURATION ---
+# --- CONFIGURATION (Sauvegarde Automatique) ---
 with t5:
-    u["mode"] = st.radio("Mode de jeu", ["Nomade", "Séide", "Exalté"])
-    if st.button("Sauvegarder Mode"): save_data(u); st.success("Mode enregistré.")
+    st.subheader("🎮 Paramètres")
+    # Utilisation de on_change pour la sauvegarde auto
+    st.radio("Mode de jeu", ["Nomade", "Séide", "Exalté"], index=["Nomade", "Séide", "Exalté"].index(u["mode"]), key="new_mode", on_change=update_mode)
+    
     st.divider()
+    st.subheader("⚙️ Gestionnaire de Quêtes")
     cp, ct, cb = st.columns([1, 2, 1])
     sel_p = cp.selectbox("Période", list(u["task_lists"].keys()))
-    name_t = ct.text_input("Intitulé de l'objectif")
+    name_t = ct.text_input("Intitulé")
     if cb.button("Ajouter"):
         if name_t: u["task_lists"][sel_p].append(name_t); save_data(u); st.rerun()
     for p, tasks in u["task_lists"].items():
