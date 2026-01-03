@@ -106,36 +106,54 @@ st.markdown(f"""
 
 tabs = st.tabs(["⚔️ Quêtes", "📊 Statistiques", "🧩 Système", "⚙️ Configuration"])
 
-# --- TAB 1 : QUÊTES & ASCENSION ---
+# --- TAB 1 : QUÊTES & REGISTRE ---
 with tabs[0]:
     req = get_xp_required(u['level'])
     st.progress(min(max(u['xp']/req, 0.0), 1.0))
     st.write(f"XP : **{u['xp']} / {req}**")
     
-    with st.expander("📜 Chemin de l'Ascension", expanded=False):
-        # Timeline Horizontale Optimisée Smartphone (Scrollable)
-        timeline_html = '<div style="display: flex; overflow-x: auto; padding: 20px 0; scroll-behavior: smooth;">'
+    with st.expander("📜 Registre des Rangs", expanded=False):
+        # Timeline Horizontale avec injection HTML propre
+        timeline_items = ""
         for l_req, t_name, t_color in TITLES_DATA:
             is_unlocked = u['level'] >= l_req
             is_current = get_current_title_info(u['level'])[0] == l_req
             disp_name = t_name if is_unlocked else "???"
             dot_color = t_color if is_unlocked else "#333"
             opacity = "1" if is_unlocked else "0.4"
-            pulse = "animation: pulse 2s infinite;" if is_current else ""
-            border = "white" if is_current else "transparent"
+            pulse_class = "pulse-active" if is_current else ""
+            border_style = f"border: 2px solid {'white' if is_current else 'transparent'};"
             
-            timeline_html += f"""
-                <div style="min-width: 80px; text-align: center; opacity: {opacity}; margin-right: 10px;">
-                    <style>
-                    @keyframes pulse {{ 0% {{ box-shadow: 0 0 0 0 {t_color}77; }} 70% {{ box-shadow: 0 0 0 8px {t_color}00; }} 100% {{ box-shadow: 0 0 0 0 {t_color}00; }} }}
-                    </style>
-                    <div style="width: 14px; height: 14px; background: {dot_color}; border-radius: 50%; margin: 0 auto; border: 2px solid {border}; {pulse}"></div>
-                    <p style="font-size: 0.6em; color: {dot_color}; margin-top: 8px; font-weight: bold;">{disp_name}</p>
-                    <p style="font-size: 0.5em; color: #555;">Niv.{l_req}</p>
+            timeline_items += f"""
+                <div style="min-width: 90px; text-align: center; opacity: {opacity}; margin-right: 15px;">
+                    <div class="dot {pulse_class}" style="width: 14px; height: 14px; background: {dot_color}; border-radius: 50%; margin: 0 auto; {border_style}"></div>
+                    <p style="font-size: 0.65em; color: {dot_color}; margin-top: 8px; font-weight: bold; white-space: nowrap;">{disp_name}</p>
+                    <p style="font-size: 0.55em; color: #666; margin-top: -5px;">Niv.{l_req}</p>
                 </div>
             """
-        timeline_html += '</div>'
-        st.markdown(timeline_html, unsafe_allow_html=True)
+        
+        st.markdown(f"""
+            <style>
+            @keyframes pulse-anim {{
+                0% {{ box-shadow: 0 0 0 0 {title_color}77; }}
+                70% {{ box-shadow: 0 0 0 8px {title_color}00; }}
+                100% {{ box-shadow: 0 0 0 0 {title_color}00; }}
+            }}
+            .pulse-active {{ animation: pulse-anim 2s infinite; }}
+            .scroll-container {{
+                display: flex; 
+                overflow-x: auto; 
+                padding: 15px 5px; 
+                scroll-behavior: smooth;
+                -webkit-overflow-scrolling: touch;
+            }}
+            .scroll-container::-webkit-scrollbar {{ height: 4px; }}
+            .scroll-container::-webkit-scrollbar-thumb {{ background: #333; border-radius: 10px; }}
+            </style>
+            <div class="scroll-container">
+                {timeline_items}
+            </div>
+        """, unsafe_allow_html=True)
 
     st.divider()
     
