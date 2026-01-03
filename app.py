@@ -28,14 +28,14 @@ def get_capacity_for_period(lvl, period):
     if period == "Quotidiennes": return 4 + (lvl // 20)
     return 1
 
-# --- 3. CONFIGURATION DES TITRES & BADGES ---
+# --- 3. CONFIGURATION DES TITRES & BADGES (SYNTAXE CORRIGÉE) ---
 TITLES_DATA = [
     (1, "Rang E", "#7F8C8D"), (3, "Néophyte", "#95A5A6"), (6, "Aspirant", "#BDC3C7"),
     (10, "Soldat de Plomb", "#D35400"), (14, "Gardien de Fer", "#7F8C8D"), (19, "Traqueur Silencieux", "#2C3E50"),
     (24, "Vanguard", "#2980B9"), (30, "Chevalier d'Acier", "#34495E"), (36, "Briseur de Chaînes", "#E67E22"),
     (43, "Architecte du Destin", "#8E44AD"), (50, "Légat du Système", "#16A085"), (58, "Commandeur", "#27AE60"),
-    (66: "Seigneur de Guerre", "#C0392B"), (75, "Entité Transcendante", "#F1C40F"), (84, "Demi-Dieu", "#F39C12"),
-    (93: "Souverain", "#E74C3C"), (100, "LEVEL CRUSHER", "#00FFCC")
+    (66, "Seigneur de Guerre", "#C0392B"), (75, "Entité Transcendante", "#F1C40F"), (84, "Demi-Dieu", "#F39C12"),
+    (93, "Souverain", "#E74C3C"), (100, "LEVEL CRUSHER", "#00FFCC")
 ]
 
 def get_current_title_info(lvl):
@@ -113,7 +113,7 @@ with tabs[0]:
     st.progress(min(max(u['xp']/req, 0.0), 1.0))
     st.write(f"XP : **{u['xp']} / {req}**")
     
-    # TIMELINE DES TITRES
+    # TIMELINE DES TITRES (HORIZONTALE)
     st.markdown("<br>", unsafe_allow_html=True)
     cols_t = st.columns(len(TITLES_DATA))
     for i, (l_req, t_name, t_color) in enumerate(TITLES_DATA):
@@ -132,7 +132,7 @@ with tabs[0]:
                 </style>
                 <div style="text-align:center; opacity:{op};">
                     <div style="width:12px; height:12px; background:{bg}; border-radius:50%; margin:0 auto; border:2px solid {border}; {pulse}"></div>
-                    <p style="font-size:0.6em; color:{bg if is_unlocked else '#555'}; margin-top:5px; line-height:1;">{t_name}</p>
+                    <p style="font-size:0.55em; color:{bg if is_unlocked else '#555'}; margin-top:5px; line-height:1;">{t_name}</p>
                 </div>
             """, unsafe_allow_html=True)
     
@@ -161,10 +161,11 @@ with tabs[0]:
                                 process_xp_change(-(100 * diff), "rouge"); save_data(u); st.rerun()
                     idx += 1
 
-# --- TAB 2 : STATISTIQUES (Radar & Graphe) ---
+# --- TAB 2 : STATISTIQUES ---
 with tabs[1]:
     c1, c2 = st.columns([1.5, 1])
     with c1:
+        st.markdown("<h3 style='text-align: center; margin-bottom: 0px;'>📈 Progression</h3>", unsafe_allow_html=True)
         if u["xp_history"]:
             df = pd.DataFrame(u["xp_history"]); df['date'] = pd.to_datetime(df['date'])
             fig = go.Figure()
@@ -175,6 +176,7 @@ with tabs[1]:
             fig.update_layout(template="plotly_dark", height=400, margin=dict(l=10, r=10, t=10, b=10), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
             st.plotly_chart(fig, use_container_width=True)
     with c2:
+        st.markdown("<h3 style='text-align: center; margin-bottom: 0px;'>🕸️ Profil de Puissance</h3>", unsafe_allow_html=True)
         fig_r = go.Figure(data=go.Scatterpolar(r=list(u['stats'].values()), theta=list(u['stats'].keys()), fill='toself', line_color='#00FFCC'))
         fig_r.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, max(u['stats'].values())+10])), template="plotly_dark", height=400, margin=dict(l=40, r=40, t=10, b=10))
         st.plotly_chart(fig_r, use_container_width=True)
@@ -182,7 +184,7 @@ with tabs[1]:
 # --- TAB 3 : SYSTÈME ---
 with tabs[2]:
     cap_q = get_capacity_for_period(u['level'], "Quotidiennes")
-    st.subheader("🧩 Architecture du Système")
+    st.subheader("🧩 Architecture")
     st.markdown(f"**Quotidiennes** : {cap_q} slots | **Autres** : 1 slot.")
 
 # --- TAB 4 : CONFIGURATION ---
@@ -221,4 +223,5 @@ with st.sidebar:
             u["completed_quests"] = [q for q in u["completed_quests"] if q not in u["task_lists"].get(p, [])]
             save_data(u); st.rerun()
     st.divider()
-    if st.button("💀 HARD RESET", type="primary"): st.session_state.user_data = get_default_data(); save_data(u); st.rerun()
+    if st.button("💀 HARD RESET", type="primary"): 
+        u = get_default_data(); save_data(u); st.rerun()
