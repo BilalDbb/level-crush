@@ -29,11 +29,11 @@ def get_capacity_for_period(lvl, period):
     if period == "Quotidiennes": return 4 + (lvl // 20)
     return 1
 
-# --- 3. CONFIGURATION DES TITRES ---
+# --- 3. CONFIGURATION DES TITRES (Couleurs Uniques) ---
 TITLES_DATA = [
-    (1, "Starter", "#7F8C8D"), (3, "Néophyte", "#95A5A6"), (6, "Aspirant", "#BDC3C7"),
-    (10, "Soldat de Plomb", "#D35400"), (14, "Gardien de Fer", "#95A5A6"), (19, "Traqueur Silencieux", "#2C3E50"),
-    (24, "Vanguard", "#2980B9"), (30, "Chevalier d'Acier", "#34495E"), (36, "Briseur de Chaînes", "#E67E22"),
+    (1, "Starter", "#95A5A6"), (3, "Néophyte", "#7F8C8D"), (6, "Aspirant", "#BDC3C7"),
+    (10, "Soldat de Plomb", "#D35400"), (14, "Gardien de Fer", "#34495E"), (19, "Traqueur Silencieux", "#2C3E50"),
+    (24, "Vanguard", "#2980B9"), (30, "Chevalier d'Acier", "#5D6D7E"), (36, "Briseur de Chaînes", "#E67E22"),
     (43, "Architecte du Destin", "#8E44AD"), (50, "Légat du Système", "#16A085"), (58, "Commandeur", "#27AE60"),
     (66, "Seigneur de Guerre", "#C0392B"), (75, "Entité Transcendante", "#F1C40F"), (84, "Demi-Dieu", "#F39C12"),
     (93, "Souverain", "#E74C3C"), (100, "LEVEL CRUSHER", "#00FFCC")
@@ -108,19 +108,19 @@ with tabs[0]:
             dot_color = t_color if is_unlocked else "#333"
             opacity = "1" if is_unlocked else "0.4"
             pulse = "pulse-active" if is_current else ""
-            border = "2px solid white" if is_current else "2px solid transparent"
+            border = "2px solid white" if is_current else "1px solid rgba(255,255,255,0.1)"
             
             items_html += f"""
-                <div style="min-width: 90px; text-align: center; opacity: {opacity}; margin-right: 15px;">
+                <div style="min-width: 95px; text-align: center; opacity: {opacity}; margin-right: 15px;">
                     <div class="dot {pulse}" style="width: 14px; height: 14px; background: {dot_color}; border-radius: 50%; margin: 0 auto; {border}"></div>
-                    <p style="font-size: 11px; color: {dot_color}; margin-top: 8px; font-weight: bold; font-family: sans-serif;">{disp_name}</p>
+                    <p style="font-size: 11px; color: {dot_color}; margin-top: 8px; font-weight: bold; font-family: sans-serif; white-space: nowrap;">{disp_name}</p>
                     <p style="font-size: 9px; color: #666; font-family: sans-serif;">Niv.{l_req}</p>
                 </div>
             """
 
         timeline_code = f"""
             <style>
-            body {{ background-color: transparent; margin: 0; }}
+            body {{ background-color: transparent; margin: 0; overflow: hidden; }}
             @keyframes pulse-anim {{
                 0% {{ box-shadow: 0 0 0 0 {title_color}77; }}
                 70% {{ box-shadow: 0 0 0 8px {title_color}00; }}
@@ -130,7 +130,7 @@ with tabs[0]:
             .scroll-wrapper {{
                 display: flex; 
                 overflow-x: auto; 
-                padding: 15px 5px;
+                padding: 20px 5px;
                 scrollbar-width: thin;
                 scrollbar-color: #444 transparent;
             }}
@@ -141,7 +141,7 @@ with tabs[0]:
                 {items_html}
             </div>
         """
-        components.html(timeline_code, height=100)
+        components.html(timeline_code, height=110)
 
     st.divider()
     idx = 0
@@ -165,10 +165,11 @@ with tabs[0]:
                                 process_xp_change(-(100 * diff), "rouge"); save_data(u); st.rerun()
                     idx += 1
 
-# --- TABS 2, 3, 4 ---
+# --- TABS STATS, SYSTEM, CONFIG ---
 with tabs[1]:
     c1, c2 = st.columns([1.5, 1])
     with c1:
+        st.markdown("<h3 style='text-align: center; margin-bottom: 0px;'>📈 Progression</h3>", unsafe_allow_html=True)
         if u["xp_history"]:
             df = pd.DataFrame(u["xp_history"]); df['date'] = pd.to_datetime(df['date'])
             fig = go.Figure()
