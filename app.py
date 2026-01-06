@@ -1,263 +1,273 @@
 import streamlit as st
-import streamlit.components.v1 as components
-import json
 import pandas as pd
-import plotly.graph_objects as go
+import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
-from supabase import create_client, Client
+import random
 
-# --- 1. CONNEXION ---
-try:
-    supabase: Client = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
-except Exception as e:
-    st.error(f"Erreur Cloud : {e}")
-    st.stop()
+# --- CONFIGURATION DE LA PAGE ---
+st.set_page_config(page_title="Task RPG", page_icon="⚔️")
 
-# --- 2. LOGIQUE SYSTÈME ---
-def get_xp_required(lvl):
-    next_lvl = lvl + 1
-    if lvl < 5: return int(200 * (next_lvl**1.2))
-    elif 5 <= lvl < 100: return int(25 * (next_lvl**1.2))
-    else: return int(int(25 * (100**1.2)) * 10)
-
-def get_total_cumulated_xp(lvl, current_xp):
-    total = 0
-    for l in range(1, lvl): total += get_xp_required(l)
-    return total + current_xp
-
-def get_capacity_for_period(lvl, period):
-    if period == "Quotidiennes": return 4 + (lvl // 20)
-    return 1
-
-# --- 3. CONFIGURATION DES TITRES ---
-TITLES_DATA = [(1, "Starter", "#DCDDDF"), (3, "Néophyte", "#3498DB"), (6, "Aspirant", "#2ECC71"), (10, "Soldat de Plomb", "#E67E22"), (14, "Gardien de Fer", "#95A5A6"), (19, "Traqueur Silencieux", "#9B59B6"), (24, "Vanguard", "#2980B9"), (30, "Chevalier d'Acier", "#BDC3C7"), (36, "Briseur de Chaînes", "#F39C12"), (43, "Architecte du Destin", "#34495E"), (50, "Légat du Système", "#16A085"), (58, "Commandeur", "#27AE60"), (66, "Seigneur de Guerre", "#C0392B"), (75, "Entité Transcendante", "#F1C40F"), (84, "Demi-Dieu", "#E74C3C"), (93, "Souverain", "#8E44AD"), (100, "LEVEL CRUSHER", "#000000")]
-
-def get_current_title_info(lvl):
-    current = TITLES_DATA[0]
-    for l_req, name, color in TITLES_DATA:
-        if lvl >= l_req: current = (l_req, name, color)
-    return current
-
-def get_default_data():
-    return {
-        "level": 1, "xp": 0, "mode": "Séide", 
-        "stats": {"Physique": 0, "Connaissances": 0, "Autonomie": 0, "Mental": 0}, 
-        "completed_quests": [], 
-        "task_lists": {"Quotidiennes": [], "Hebdomadaires": [], "Mensuelles": [], "Trimestrielles": [], "Annuelles": []}, 
-        "task_diffs": {}, "task_stat_links": {}, "combat_log": [], "xp_history": [], "internal_date": datetime.now().strftime("%Y-%m-%d")
+# --- STYLE CSS (Optionnel pour le look) ---
+st.markdown("""
+<style>
+    .stButton>button {
+        width: 100%;
     }
+</style>
+""", unsafe_allow_html=True)
 
-# --- 4. GESTION DES DONNÉES ---
-MY_ID = "shadow_monarch_01" 
-def load_data():
-    try:
-        res = supabase.table('profiles').select('data').eq('user_id', MY_ID).execute()
-        if res.data:
-            d = res.data[0]['data']
-            if isinstance(d, str): d = json.loads(d)
-            for k in ["combat_log", "task_stat_links", "task_diffs"]:
-                if k not in d: d[k] = [] if k=="combat_log" else {}
-            # Assurer les clés de stats par défaut si manquantes
-            for s in ["Physique", "Connaissances", "Autonomie", "Mental"]:
-                if s not in d["stats"]: d["stats"][s] = 0
-            return d
-    except: pass
-    return get_default_data()
+# --- INITIALISATION SESSION STATE (Simulation BDD) ---
+if 'tasks' not in st.session_state:
+    # Structure: id, name, xp_reward, mode (seide/exalte)
+    st.session_state.tasks = [
+        {"id": 1, "name": "Boire 2L d'eau", "xp": 10, "mode": "Séide"},
+        {"id": 2, "name": "Code 1h", "xp": 50, "mode": "Exalté"}
+    ]
 
-def save_data(data):
-    supabase.table('profiles').upsert({"user_id": MY_ID, "data": data}).execute()
+if 'logs' not in st.session_state:
+    # Structure: date (str), tasks_completed (list of ids), level_up (bool)
+    # On génère un peu d'historique pour tester le graphique
+    st.session_state.logs = []
+    base = datetime.today()
+    for x in range(7, 0, -1):
+        date = (base - timedelta(days=x)).strftime("%Y-%m-%d")
+        st.session_state.logs.append({
+            "date": date,
+            "tasks_completed": [1, 2] if random.random() > 0.5 else [1], # Random completion
+            "level_up": True if x == 4 else False # Fake level up
+        })
 
-u = load_data()
+if 'user_xp' not in st.session_state:
+    st.session_state.user_xp = 120
 
-def process_xp_change(amount, task_name=None, status="fait"):
-    u['xp'] += amount
-    log_msg = f"{status.upper()} : {task_name if task_name else 'Action'} ({amount:+d} XP)"
-    if status == "fait" and task_name in u["task_stat_links"]:
-        stat_name = u["task_stat_links"][task_name]
-        gain_stat = u["task_diffs"].get(task_name, 1)
-        u["stats"][stat_name] = round(u["stats"][stat_name] + gain_stat, 1)
-        log_msg += f" | +{gain_stat} {stat_name}"
-    while True:
-        req = get_xp_required(u['level'])
-        if u['xp'] >= req and u['level'] < 100: u['xp'] -= req; u['level'] += 1; st.toast("🌟 LEVEL UP !")
-        else: break
-    if u['mode'] == "Exalté":
-        while u['xp'] < 0 and u['level'] > 1: u['level'] -= 1; u['xp'] += get_xp_required(u['level']); st.toast("📉 LEVEL DOWN...")
-    u["xp_history"].append({"date": u["internal_date"], "xp_cumul": get_total_cumulated_xp(u['level'], u['xp']), "status": status})
-    u["combat_log"].insert(0, f"[{u['internal_date']}] {log_msg}")
-    u["combat_log"] = u["combat_log"][:10] # Garder un peu plus d'historique
+if 'user_lvl' not in st.session_state:
+    st.session_state.user_lvl = 2
 
-# --- 5. INTERFACE ---
-st.set_page_config(page_title="LEVEL CRUSH", layout="wide")
-curr_l_req, title_name, title_color = get_current_title_info(u['level'])
-glow_color = "#00FFCC" if title_name == "LEVEL CRUSHER" else title_color
+if 'current_date' not in st.session_state:
+    st.session_state.current_date = datetime.today().strftime("%Y-%m-%d")
 
-st.markdown(f'<div style="text-align:center;padding:10px;"><span style="color:white;font-size:1.1em;">NIV.{u["level"]}</span> <div style="display:inline-block;margin-left:12px;padding:4px 18px;border:2px solid {glow_color};border-radius:20px;box-shadow:0 0 12px {glow_color};background:{title_color};"><b style="color:{"black" if title_name=="Starter" else "#00FFCC" if title_name=="LEVEL CRUSHER" else "white"};font-size:1.3em;">{title_name}</b></div></div>', unsafe_allow_html=True)
+# --- FONCTIONS ---
 
-tabs = st.tabs(["⚔️ Quêtes", "📊 Statistiques", "🧩 Système", "⚙️ Configuration"])
+def get_tasks():
+    return st.session_state.tasks
 
-with tabs[0]:
-    req_xp = get_xp_required(u['level'])
-    st.progress(min(max(u['xp']/req_xp, 0.0), 1.0))
-    st.write(f"XP : **{u['xp']} / {req_xp}**")
+def add_task(name, xp, mode):
+    new_id = len(st.session_state.tasks) + 1
+    st.session_state.tasks.append({"id": new_id, "name": name, "xp": xp, "mode": mode})
+
+def delete_task(task_id):
+    st.session_state.tasks = [t for t in st.session_state.tasks if t['id'] != task_id]
+
+def update_task(task_id, new_name, new_xp, new_mode):
+    for t in st.session_state.tasks:
+        if t['id'] == task_id:
+            t['name'] = new_name
+            t['xp'] = new_xp
+            t['mode'] = new_mode
+
+def get_daily_log(date):
+    for log in st.session_state.logs:
+        if log['date'] == date:
+            return log
+    return None
+
+def toggle_task_completion(task_id, date):
+    log = get_daily_log(date)
+    if not log:
+        log = {"date": date, "tasks_completed": [], "level_up": False}
+        st.session_state.logs.append(log)
     
-    with st.expander("📜 Registre des Rangs", expanded=False):
-        items_html = "".join([f'<div style="min-width:90px;text-align:center;opacity:{"1" if u["level"]>=l else "0.3"};margin-right:15px;"><div class="{"pulse-active" if curr_l_req==l else ""}" style="width:14px;height:14px;background:{"#333" if u["level"]<l else c};border-radius:50%;margin:0 auto;border:2px solid {"white" if curr_l_req==l else "transparent"};"></div><p style="font-size:11px;color:{"#333" if u["level"]<l else c};margin-top:8px;font-weight:bold;">{n if u["level"]>=l else "???"}</p><p style="font-size:9px;color:#666;">Niv.{l}</p></div>' for l,n,c in TITLES_DATA])
-        components.html(f'<style>body{{background:transparent;margin:0;}}@keyframes pulse-anim{{0%{{box-shadow:0 0 0 0 {glow_color}77;}}70%{{box-shadow:0 0 0 8px {glow_color}00;}}100%{{box-shadow:0 0 0 0 {glow_color}00;}}}}.pulse-active{{animation:pulse-anim 2s infinite;}}.scroll{{display:flex;overflow-x:auto;padding:20px 5px;scrollbar-width:thin;}}</style><div class="scroll">{items_html}</div>', height=110)
-    
-    st.divider()
-    
-    # --- MODIFICATION : Affichage uniquement Quotidiennes ---
-    # Les autres sont techniquement là (dans u["task_lists"]) mais on ne les boucle pas.
-    q_p = "Quotidiennes"
-    tsks = u["task_lists"].get(q_p, [])
-    
-    st.subheader(f"📅 Quotidien ({len(tsks)}/{get_capacity_for_period(u['level'], q_p)})")
-    
-    if tsks:
-        idx = 0
-        for t in tsks:
-            done = t in u["completed_quests"]
-            c = st.columns([2, 1, 0.5, 0.5] if u['mode'] == "Exalté" else [2, 1, 1])
-            c[0].markdown(f"{'✅' if done else '🔳'} {t} <small style='color:#666'>({u['task_stat_links'].get(t, 'N/A')})</small>", unsafe_allow_html=True)
-            if not done:
-                cur_w = u["task_diffs"].get(t, 1)
-                # Limite visuelle du poids à 3 pour les dailies
-                d = c[1].select_slider("Poids", options=[1, 2, 3], value=min(cur_w, 3), key=f"s_{idx}", label_visibility="collapsed")
-                u["task_diffs"][t] = d
-                if c[2].button("✔️", key=f"v_{idx}"): process_xp_change(100 * d, t, "fait"); u["completed_quests"].append(t); save_data(u); st.rerun()
-                if u['mode'] == "Exalté" and len(c) > 3:
-                    if c[3].button("❌", key=f"x_{idx}"): process_xp_change(-(100 * d), t, "rouge"); save_data(u); st.rerun()
-            idx += 1
+    if task_id in log['tasks_completed']:
+        log['tasks_completed'].remove(task_id)
+        # Retirer XP (simplifié)
+        task = next((t for t in st.session_state.tasks if t['id'] == task_id), None)
+        if task: st.session_state.user_xp -= task['xp']
     else:
-        st.info("Aucune tâche quotidienne configurée.")
+        log['tasks_completed'].append(task_id)
+        # Ajouter XP
+        task = next((t for t in st.session_state.tasks if t['id'] == task_id), None)
+        if task: st.session_state.user_xp += task['xp']
 
-    st.subheader("🛡️ Journal de Bord") # Rename
-    for log in u["combat_log"]: st.caption(log)
+def check_levelup():
+    # Seuil arbitraire : lvl * 100 XP
+    required_xp = st.session_state.user_lvl * 100
+    if st.session_state.user_xp >= required_xp:
+        st.session_state.user_lvl += 1
+        st.session_state.user_xp -= required_xp
+        # Marquer le level up dans le log d'aujourd'hui
+        log = get_daily_log(st.session_state.current_date)
+        if log:
+            log['level_up'] = True
+        st.balloons()
+        return True
+    return False
 
-with tabs[1]:
-    c1, c2 = st.columns([1.5, 1])
-    with c1:
-        st.markdown("<h3 style='text-align:center;'>📈 Progression</h3>", unsafe_allow_html=True)
-        if u["xp_history"]:
-            df = pd.DataFrame(u["xp_history"]); df['date'] = pd.to_datetime(df['date'])
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=df['date'], y=df['xp_cumul'], mode='lines', line=dict(color='#00FFCC', width=2), name="Courbe XP"))
-            # --- MODIFICATION : Rename 'Echec/Saut' en 'Echec' ---
-            for s, col, lab in [('fait', '#00FFCC', 'Succès'), ('rouge', 'red', 'Echec')]:
-                sub = df[df['status'] == s]
-                if not sub.empty: fig.add_trace(go.Scatter(x=sub['date'], y=sub['xp_cumul'], mode='markers', marker=dict(color=col, size=8), name=lab))
-            fig.update_layout(template="plotly_dark", height=400, margin=dict(l=10, r=10, t=10, b=10), showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-            st.plotly_chart(fig, use_container_width=True)
-            
-    with c2:
-        st.markdown("<h3 style='text-align:center;'>🕸️ Équilibre du Jour</h3>", unsafe_allow_html=True)
-        # --- MODIFICATION RADAR : Calcul 0-100% basé sur les tâches du jour ---
-        stats_categories = ["Physique", "Connaissances", "Autonomie", "Mental"]
-        daily_tasks = u["task_lists"].get("Quotidiennes", [])
+# --- UI ---
+
+tabs = st.tabs(["📜 Quête", "🛠 Config", "📈 Progression"])
+
+# --- TAB 1: QUÊTE ---
+with tabs[0]:
+    st.header(f"Quêtes du {st.session_state.current_date}")
+    
+    tasks = get_tasks()
+    log = get_daily_log(st.session_state.current_date)
+    completed_ids = log['tasks_completed'] if log else []
+    
+    if not tasks:
+        st.info("Aucune tâche configurée. Va dans l'onglet Config.")
+    
+    for task in tasks:
+        col1, col2 = st.columns([0.1, 0.9])
+        is_checked = task['id'] in completed_ids
         
-        # Calcul des % par catégorie
-        cat_total_weight = {k: 0 for k in stats_categories}
-        cat_done_weight = {k: 0 for k in stats_categories}
-        
-        for t in daily_tasks:
-            cat = u["task_stat_links"].get(t, "Physique")
-            w = u["task_diffs"].get(t, 1)
-            if cat in stats_categories:
-                cat_total_weight[cat] += w
-                if t in u["completed_quests"]:
-                    cat_done_weight[cat] += w
-        
-        r_values = []
-        hover_texts = []
-        
-        for cat in stats_categories:
-            if cat_total_weight[cat] > 0:
-                val = (cat_done_weight[cat] / cat_total_weight[cat]) * 100
+        with col1:
+            if st.checkbox("", value=is_checked, key=f"check_{task['id']}"):
+                if not is_checked:
+                    toggle_task_completion(task['id'], st.session_state.current_date)
+                    check_levelup()
+                    st.rerun()
             else:
-                val = 0
-            r_values.append(val)
-            
-            # Légende demandée
-            if val == 0: txt = "Non commencé"
-            elif val == 100: txt = "Maîtrisé"
-            else: txt = "Partiel"
-            hover_texts.append(txt)
-
-        fig_r = go.Figure(data=go.Scatterpolar(
-            r=r_values, 
-            theta=stats_categories, 
-            fill='toself', 
-            line_color='#00FFCC',
-            hovertext=hover_texts,
-            hovertemplate="%{theta}: %{r:.0f}%<br>Statut: %{hovertext}<extra></extra>"
-        ))
+                if is_checked:
+                    toggle_task_completion(task['id'], st.session_state.current_date)
+                    st.rerun()
         
-        # Axe forcé 0-100
-        fig_r.update_layout(
-            polar=dict(radialaxis=dict(visible=True, range=[0, 100])), 
-            template="plotly_dark", 
-            height=400
-        )
-        st.plotly_chart(fig_r, use_container_width=True)
+        with col2:
+            st.write(f"**{task['name']}** ({task['xp']} XP) - *{task['mode']}*")
 
+# --- TAB 2: CONFIG ---
+with tabs[1]:
+    st.header("Configuration des Tâches")
+    
+    # Formulaire d'ajout
+    with st.form("add_task_form", clear_on_submit=True):
+        c1, c2, c3 = st.columns([3, 1, 2])
+        with c1:
+            new_name = st.text_input("Nom de la tâche")
+        with c2:
+            new_xp = st.number_input("XP", min_value=1, value=10)
+        with c3:
+            new_mode = st.selectbox("Mode", ["Séide", "Exalté"])
+        submitted = st.form_submit_button("Ajouter")
+        
+        if submitted and new_name:
+            add_task(new_name, new_xp, new_mode)
+            st.success("Tâche ajoutée !")
+            st.rerun()
+
+    st.divider()
+    
+    # Liste des tâches existantes (Persistante !)
+    st.subheader("Tâches existantes")
+    for i, task in enumerate(st.session_state.tasks):
+        with st.expander(f"{task['name']} ({task['xp']} XP)"):
+            with st.form(key=f"edit_{task['id']}"):
+                e_name = st.text_input("Nom", value=task['name'])
+                e_xp = st.number_input("XP", value=task['xp'])
+                e_mode = st.selectbox("Mode", ["Séide", "Exalté"], index=0 if task['mode']=="Séide" else 1)
+                
+                c_edit, c_del = st.columns(2)
+                with c_edit:
+                    if st.form_submit_button("Modifier"):
+                        update_task(task['id'], e_name, e_xp, e_mode)
+                        st.rerun()
+                with c_del:
+                    if st.form_submit_button("Supprimer", type="primary"):
+                        delete_task(task['id'])
+                        st.rerun()
+
+    st.divider()
+    
+    # Dev Tools
+    with st.expander("👨‍💻 Dev Tools (Test Zone)"):
+        st.warning("Zone développeur")
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Sauter un jour (Skip Day)"):
+                curr = datetime.strptime(st.session_state.current_date, "%Y-%m-%d")
+                st.session_state.current_date = (curr + timedelta(days=1)).strftime("%Y-%m-%d")
+                st.rerun()
+        with c2:
+            if st.button("HARD RESET", type="primary"):
+                st.session_state.clear()
+                st.rerun()
+
+# --- TAB 3: PROGRESSION ---
 with tabs[2]:
-    st.subheader("🧩 Architecture du Système")
-    st.markdown(f"""
-    **📏 Capacité & Quotas**
-    - **Quotidiennes** : {get_capacity_for_period(u['level'], 'Quotidiennes')} slots (Base: 4 | +1 par 20 lvls).
-    **🧬 Évolution**
-    Chaque succès augmente vos statistiques et votre niveau global.
-    """)
+    st.header("Tableau de bord")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Niveau Actuel", st.session_state.user_lvl)
+    with col2:
+        st.metric("XP Totale", st.session_state.user_xp)
 
-with tabs[3]:
-    st.subheader("⚙️ Configuration")
-    nm = st.radio("Mode de Jeu", ["Séide", "Exalté"], index=["Séide", "Exalté"].index(u["mode"]), help="Séide: Pas de pénalité. Exalté: Perte d'XP possible.")
-    if nm != u["mode"]: u["mode"] = nm; save_data(u); st.rerun()
-    st.divider()
+    st.subheader("Graphique de Progression")
     
-    # --- MODIFICATION : Suppression du choix de la période (Force Daily) ---
-    cp, cs, cb = st.columns([2, 1, 0.5])
-    sel_p = "Quotidiennes" # Hardcodé
-    
-    t_add = cp.text_input("Nouvelle tâche (Quotidienne)")
-    st_link = cs.selectbox("Stat", ["Physique", "Connaissances", "Autonomie", "Mental"])
-    
-    if cb.button("➕"):
-        cap = get_capacity_for_period(u['level'], sel_p)
-        if len(u["task_lists"].get(sel_p, [])) >= cap: st.error(f"Limite atteinte pour {sel_p} ({cap} slots).")
-        elif t_add and t_add not in u["task_stat_links"]:
-            u["task_lists"][sel_p].append(t_add); u["task_stat_links"][t_add] = st_link; save_data(u); st.rerun()
-    
-    # Affichage uniquement de la liste quotidienne pour édition
-    tsks = u["task_lists"].get(sel_p, [])
-    if tsks:
-        st.write(f"**Édition des tâches actives**")
-        for i, t in enumerate(tsks):
-            cx1, cx2, cx3 = st.columns([2, 1, 1])
-            nn = cx1.text_input("Nom", t, key=f"n_{sel_p}_{i}", label_visibility="collapsed")
-            ns = cx2.selectbox("Stat", ["Physique", "Connaissances", "Autonomie", "Mental"], index=["Physique", "Connaissances", "Autonomie", "Mental"].index(u['task_stat_links'].get(t, "Physique")), key=f"s_{sel_p}_{i}", label_visibility="collapsed")
-            c_bt = cx3.columns(2)
-            if c_bt[0].button("💾", key=f"sv_{sel_p}_{i}"):
-                if nn != t:
-                    u["task_lists"][sel_p][i] = nn
-                    u["task_stat_links"][nn] = u["task_stat_links"].pop(t)
-                    if t in u["task_diffs"]: u["task_diffs"][nn] = u["task_diffs"].pop(t)
-                u["task_stat_links"][nn] = ns; save_data(u); st.rerun()
-            if c_bt[1].button("❌", key=f"dl_{sel_p}_{i}"): u["task_lists"][sel_p].remove(t); u["task_stat_links"].pop(t, None); save_data(u); st.rerun()
-
-with st.sidebar:
-    st.header("⏳ Temps")
-    if st.button("⏭️ SAUTER UN JOUR"):
-        # Reset uniquement sur les quotidiennes
-        if u['mode'] == "Exalté": process_xp_change(-(len(u["task_lists"].get("Quotidiennes", [])) * 100), "Saut de jour", "rouge")
-        else: process_xp_change(0, "Saut de jour", "rouge")
-        u["internal_date"] = (datetime.strptime(u["internal_date"], "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
-        u["completed_quests"] = [q for q in u["completed_quests"] if q not in u["task_lists"].get("Quotidiennes", [])]; save_data(u); st.rerun()
-    
-    # Suppression des boutons de reset spécifiques, garder juste un Reset Daily manuel si besoin
-    if st.button("Reset Quotidiennes (Même jour)"):
-        u["completed_quests"] = [q for q in u["completed_quests"] if q not in u["task_lists"].get("Quotidiennes", [])]; save_data(u); st.rerun()
+    # Préparation des données pour le graph
+    df_logs = pd.DataFrame(st.session_state.logs)
+    if not df_logs.empty:
+        df_logs['date_dt'] = pd.to_datetime(df_logs['date'])
+        df_logs = df_logs.sort_values('date_dt')
         
-    st.divider()
-    if st.button("💀 HARD RESET"): save_data(get_default_data()); st.rerun()
+        # Calcul du % de complétion par jour
+        total_tasks_count = len(st.session_state.tasks) if st.session_state.tasks else 1
+        # Note: Pour un historique précis, il faudrait stocker le nb de tâches total ce jour là. 
+        # Ici on prend le nb actuel par simplification.
+        
+        df_logs['completion_pct'] = df_logs['tasks_completed'].apply(lambda x: len(x) / total_tasks_count * 100)
+        
+        # Filtres (Légende interactive simulée)
+        st.caption("Filtres (Cliquez pour masquer/afficher)")
+        c1, c2, c3, c4, c5 = st.columns(5)
+        show_curve = c1.checkbox("Courbe", True)
+        show_100 = c2.checkbox("100% (Vert)", True)
+        show_mid = c3.checkbox("1-99% (Orange)", True)
+        show_0 = c4.checkbox("0% (Rouge)", True)
+        show_lvlup = c5.checkbox("Lvl Up (Noir)", True)
+
+        # Création du graphique style "Fait main"
+        with plt.xkcd():
+            fig, ax = plt.subplots(figsize=(10, 6))
+            
+            # 1. La Courbe
+            if show_curve:
+                ax.plot(df_logs['date_dt'], df_logs['completion_pct'], color='blue', alpha=0.3, label='Progression')
+
+            # 2. Les Points (Logique de couleur)
+            for _, row in df_logs.iterrows():
+                date_val = row['date_dt']
+                pct = row['completion_pct']
+                is_lvl_up = row['level_up']
+
+                # Priorité au Level Up
+                if is_lvl_up and show_lvlup:
+                    ax.scatter([date_val], [pct], color='black', s=150, zorder=10, marker='D', label='Level Up')
+                
+                # Couleurs selon %
+                if pct == 100 and show_100:
+                    ax.scatter([date_val], [pct], color='green', s=100, zorder=5)
+                elif pct == 0 and show_0:
+                    ax.scatter([date_val], [pct], color='red', s=100, zorder=5)
+                elif 0 < pct < 100 and show_mid:
+                    ax.scatter([date_val], [pct], color='orange', s=100, zorder=5)
+
+            ax.set_ylim(-5, 110)
+            ax.set_ylabel("% Tâches accomplies")
+            ax.set_title("Ma Super Progression")
+            
+            # Formatage des dates
+            fig.autofmt_xdate()
+            
+            # Fond transparent pour le style
+            fig.patch.set_alpha(0)
+            ax.patch.set_alpha(0)
+            
+            st.pyplot(fig)
+    else:
+        st.write("Pas encore de données pour le graphique.")
+
+# --- DEPENDANCES (requirements.txt) ---
+# streamlit
+# pandas
+# matplotlib
