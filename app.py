@@ -14,10 +14,9 @@ except Exception as e:
     st.stop()
 
 # --- 2. LOGIQUE SYSTÈME ---
-XP_PER_TASK = 100  # Valeur fixe pour chaque tâche
+XP_PER_TASK = 100
 
 def get_xp_required(lvl):
-    # Formule exponentielle douce pour la montée en niveau
     next_lvl = lvl + 1
     if lvl < 5: return int(200 * (next_lvl**1.2))
     elif 5 <= lvl < 100: return int(25 * (next_lvl**1.2))
@@ -28,7 +27,6 @@ def get_total_cumulated_xp(lvl, current_xp):
     for l in range(1, lvl): total += get_xp_required(l)
     return total + current_xp
 
-# --- 3. CONFIGURATION DES TITRES ---
 TITLES_DATA = [(1, "Starter", "#DCDDDF"), (3, "Néophyte", "#3498DB"), (6, "Aspirant", "#2ECC71"), (10, "Soldat de Plomb", "#E67E22"), (14, "Gardien de Fer", "#95A5A6"), (19, "Traqueur Silencieux", "#9B59B6"), (24, "Vanguard", "#2980B9"), (30, "Chevalier d'Acier", "#BDC3C7"), (36, "Briseur de Chaînes", "#F39C12"), (43, "Architecte du Destin", "#34495E"), (50, "Légat du Système", "#16A085"), (58, "Commandeur", "#27AE60"), (66, "Seigneur de Guerre", "#C0392B"), (75, "Entité Transcendante", "#F1C40F"), (84, "Demi-Dieu", "#E74C3C"), (93, "Souverain", "#8E44AD"), (100, "LEVEL CRUSHER", "#000000")]
 
 def get_current_title_info(lvl):
@@ -39,13 +37,12 @@ def get_current_title_info(lvl):
 
 def get_default_data():
     return {
-        "level": 1, "xp": 0, "mode": "Séide", 
-        "completed_quests": [], 
-        "task_lists": {"Quotidiennes": []}, # On garde la structure dict au cas où tu revoudrais l'hebdo un jour
+        "level": 1, "xp": 0, "mode": "Séide", "theme": "Sombre",
+        "completed_quests": [], "task_lists": {"Quotidiennes": []},
         "combat_log": [], "xp_history": [], "internal_date": datetime.now().strftime("%Y-%m-%d")
     }
 
-# --- 4. GESTION DES DONNÉES ---
+# --- 3. GESTION DES DONNÉES ---
 MY_ID = "shadow_monarch_01" 
 def load_data():
     try:
@@ -53,14 +50,10 @@ def load_data():
         if res.data:
             d = res.data[0]['data']
             if isinstance(d, str): d = json.loads(d)
-            # Nettoyage des vieilles clés si elles existent encore dans la DB
-            if "stats" in d: del d["stats"]
+            if "theme" not in d: d["theme"] = "Sombre"
+            # Migration structure
             if "task_diffs" in d: del d["task_diffs"]
-            if "task_stat_links" in d: del d["task_stat_links"]
-            
-            # Init clés manquantes
-            if "combat_log" not in d: d["combat_log"] = []
-            if "xp_history" not in d: d["xp_history"] = []
+            if "stats" in d: del d["stats"]
             return d
     except: pass
     return get_default_data()
@@ -70,187 +63,283 @@ def save_data(data):
 
 u = load_data()
 
-def process_xp_change(amount, task_name=None, status="fait"):
+# --- 4. CSS DYNAMIQUE (THEMING) ---
+# Définition des palettes
+PALETTE = {
+    "Sombre": {
+        "bg": "#0e1117", "card_bg": "#1e2130", "text": "#ffffff", "border": "#333",
+        "success_border": "#00FFCC", "success_bg": "rgba(0, 255, 204, 0.1)"
+    },
+    "Clair": {
+        "bg": "#ffffff", "card_bg": "#f0f2f6", "text": "#000000", "border": "#ddd",
+        "success_border": "#00aa88", "success_bg": "rgba(0, 170, 136, 0.1)"
+    }
+}
+P = PALETTE[u.get("theme", "Sombre")]
+
+st.set_page_config(page_title="LEVEL CRUSH", layout="wide")
+
+# Injection CSS
+st.markdown(f"""
+    <style>
+    .stApp {{ background-color: {P['bg']}; color: {P['text']}; }}
+    .task-card {{
+        background-color: {P['card_bg']};
+        padding: 15px;
+        border-radius: 10px;
+        border: 1px solid {P['border']};
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+        transition: all 0.3s ease;
+    }}
+    .task-card.done {{
+        border: 1px solid {P['success_border']};
+        background-color: {P['success_bg']};
+        box-shadow: 0 0 10px {P['success_border']}40;
+    }}
+    .task-title {{ font-weight: bold; font-size: 1.1em; color: {P['text']}; flex-grow: 1; margin-left: 15px; }}
+    .stButton>button {{ border-radius: 8px; border: none; font-weight: bold; }}
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- 5. LOGIQUE MÉTIER ---
+def process_xp_change(amount, task_name=None, type="action"):
     u['xp'] += amount
-    log_msg = f"{status.upper()} : {task_name if task_name else 'Action'} ({amount:+d} XP)"
     
-    # Gestion Montée de niveau
+    # Level Logic
+    leveled_up = False
     while True:
         req = get_xp_required(u['level'])
-        if u['xp'] >= req and u['level'] < 100: 
+        if u['xp'] >= req and u['level'] < 100:
             u['xp'] -= req
             u['level'] += 1
-            st.toast(f"🌟 LEVEL UP ! Vous êtes maintenant niveau {u['level']}")
+            leveled_up = True
+            st.toast(f"🔥 LEVEL UP! NIVEAU {u['level']} 🔥")
         else: break
         
-    # Gestion Descente de niveau (Mode Exalté uniquement)
-    if u['mode'] == "Exalté":
-        while u['xp'] < 0 and u['level'] > 1: 
-            u['level'] -= 1
-            u['xp'] += get_xp_required(u['level'])
-            st.toast("📉 LEVEL DOWN...")
+    if u['mode'] == "Exalté" and u['xp'] < 0 and u['level'] > 1:
+        u['level'] -= 1
+        u['xp'] += get_xp_required(u['level'])
+        st.toast("💀 LEVEL DOWN...")
 
-    u["xp_history"].append({"date": u["internal_date"], "xp_cumul": get_total_cumulated_xp(u['level'], u['xp']), "status": status})
-    u["combat_log"].insert(0, f"[{u['internal_date']}] {log_msg}")
-    u["combat_log"] = u["combat_log"][:15]
+    # Log
+    time_str = datetime.now().strftime("%H:%M")
+    if task_name:
+        log_txt = f"{time_str} | {task_name} ({amount:+d} XP)"
+        u["combat_log"].insert(0, log_txt)
+        u["combat_log"] = u["combat_log"][:15] # Limite journal
+    
+    # Enregistrement Graphique (Si Level Up, on marque un point noir)
+    if leveled_up:
+        u["xp_history"].append({
+            "date": u["internal_date"], 
+            "xp_cumul": get_total_cumulated_xp(u['level'], u['xp']), 
+            "status": "level_up"
+        })
 
-# --- 5. INTERFACE ---
-st.set_page_config(page_title="LEVEL CRUSH", layout="wide")
+# --- 6. HEADER ---
+c_title, c_lvl = st.columns([3, 1])
 curr_l_req, title_name, title_color = get_current_title_info(u['level'])
-glow_color = "#00FFCC" if title_name == "LEVEL CRUSHER" else title_color
 
-# Header (Niveau & Titre)
-st.markdown(f'<div style="text-align:center;padding:10px;"><span style="color:white;font-size:1.1em;">NIV.{u["level"]}</span> <div style="display:inline-block;margin-left:12px;padding:4px 18px;border:2px solid {glow_color};border-radius:20px;box-shadow:0 0 12px {glow_color};background:{title_color};"><b style="color:{"black" if title_name=="Starter" else "#00FFCC" if title_name=="LEVEL CRUSHER" else "white"};font-size:1.3em;">{title_name}</b></div></div>', unsafe_allow_html=True)
+with c_title:
+    st.markdown(f"# ⚔️ LEVEL CRUSH")
 
-# Barre XP globale
+with c_lvl:
+    st.markdown(f"""
+    <div style="text-align:right; padding:10px;">
+        <span style="font-size:1.5em; font-weight:bold; color:{title_color};">NIV. {u['level']}</span><br>
+        <span style="font-size:0.8em; color:gray; text-transform:uppercase; letter-spacing:2px;">{title_name}</span>
+    </div>
+    """, unsafe_allow_html=True)
+
+# Barre XP
 req_xp = get_xp_required(u['level'])
-st.progress(min(max(u['xp']/req_xp, 0.0), 1.0))
-st.caption(f"XP : **{u['xp']} / {req_xp}** (Prochain niveau à {req_xp - u['xp']})")
+progress = min(max(u['xp']/req_xp, 0.0), 1.0)
+st.progress(progress)
 
-tabs = st.tabs(["⚔️ Quêtes", "📈 Progression", "⚙️ Config"])
+# --- 7. TABS ---
+tabs = st.tabs(["🎯 Quêtes", "📈 Evolution", "⚙️ Config"])
 
 with tabs[0]:
-    # --- SECTION QUÊTES ---
     tsks = u["task_lists"].get("Quotidiennes", [])
-    
-    st.subheader(f"📅 Missions du Jour ({len(tsks)})")
+    completed_count = 0
     
     if tsks:
         for i, t in enumerate(tsks):
             done = t in u["completed_quests"]
+            if done: completed_count += 1
             
-            # Layout simplifié : Check | Titre | Bouton Delete (si besoin)
-            container = st.container()
-            c1, c2, c3 = container.columns([0.5, 4, 0.5])
+            # Container HTML pour le style
+            css_class = "task-card done" if done else "task-card"
+            icon = "🌟" if done else "⚔️"
             
-            # 1. Action Button
+            # Layout avec colonnes Streamlit imbriquées dans le style visuel c'est compliqué
+            # On utilise une approche mixte : Style via Markdown, Bouton via Streamlit
+            
+            col_ui = st.container()
+            c1, c2, c3 = col_ui.columns([0.15, 0.75, 0.1])
+            
             with c1:
-                if done:
-                    st.success("✔")
-                else:
-                    if st.button("⬜", key=f"check_{i}"):
-                        process_xp_change(XP_PER_TASK, t, "fait")
+                # Bouton centré et propre
+                if not done:
+                    if st.button("⬜", key=f"do_{i}"):
+                        process_xp_change(XP_PER_TASK, t)
                         u["completed_quests"].append(t)
                         save_data(u)
                         st.rerun()
-            
-            # 2. Titre Tâche
-            with c2:
-                if done:
-                    st.markdown(f"~~{t}~~", unsafe_allow_html=True)
                 else:
-                    st.markdown(f"**{t}**")
-
-            # 3. Penalité (Si mode Exalté et pas fait)
-            if u['mode'] == "Exalté" and not done:
-                 if c3.button("✖", key=f"fail_{i}", help="Déclarer l'échec (-XP)"):
-                     process_xp_change(-XP_PER_TASK, t, "echec")
-                     save_data(u)
-                     st.rerun()
+                    st.markdown("<div style='text-align:center; font-size:1.5em;'>✅</div>", unsafe_allow_html=True)
             
-            st.divider()
+            with c2:
+                # Titre stylisé sans strikethrough
+                color_css = P['success_border'] if done else P['text']
+                weight = "bold" if done else "normal"
+                st.markdown(f"<div style='padding-top:10px; color:{color_css}; font-weight:{weight}; font-size:1.1em;'>{t}</div>", unsafe_allow_html=True)
+            
+            with c3:
+                 if u['mode'] == "Exalté" and not done:
+                     if st.button("✖", key=f"fail_{i}", help="Echec (-XP)"):
+                        process_xp_change(-XP_PER_TASK, t)
+                        save_data(u)
+                        st.rerun()
+            
+            st.markdown("---") # Séparateur fin
     else:
-        st.info("Aucune mission active. Ajoutez-en une dans l'onglet Config !")
+        st.info("Aucune quête. Va dans Config pour en ajouter.")
 
-    st.subheader("🛡️ Journal de Bord")
-    for log in u["combat_log"]: st.caption(log)
+    # Journal
+    with st.expander("📜 Journal de Bord (Dernières actions)"):
+        for log in u["combat_log"]:
+            st.caption(log)
 
 with tabs[1]:
-    # --- SECTION STATS SIMPLIFIÉES ---
-    st.markdown("<h3 style='text-align:center;'>Courbe de Puissance</h3>", unsafe_allow_html=True)
+    st.subheader("Performance")
+    
     if u["xp_history"]:
         df = pd.DataFrame(u["xp_history"])
         df['date'] = pd.to_datetime(df['date'])
         
         fig = go.Figure()
-        # Ligne principale
-        fig.add_trace(go.Scatter(x=df['date'], y=df['xp_cumul'], mode='lines', line=dict(color='#00FFCC', width=3), name="XP Total"))
         
-        # Points de succès/échec
-        succes = df[df['status'] == 'fait']
-        echecs = df[df['status'].isin(['echec', 'rouge'])]
+        # 1. La Ligne (Courbe de progression)
+        fig.add_trace(go.Scatter(
+            x=df['date'], y=df['xp_cumul'], 
+            mode='lines', 
+            line=dict(color='#444444', width=2), 
+            showlegend=False
+        ))
         
-        if not succes.empty:
-            fig.add_trace(go.Scatter(x=succes['date'], y=succes['xp_cumul'], mode='markers', marker=dict(color='#00FFCC', size=6), name="Succès"))
-        if not echecs.empty:
-            fig.add_trace(go.Scatter(x=echecs['date'], y=echecs['xp_cumul'], mode='markers', marker=dict(color='red', size=6), name="Echec"))
+        # 2. Les Points (Logique de couleur)
+        # Rouge: 0%, Orange: 1-99%, Vert: 100%, Noir: Level Up
+        
+        # On définit les couleurs manuelles pour Plotly
+        colors = {'daily_0': '#FF4B4B', 'daily_partial': '#FFAA00', 'daily_100': '#00CC96', 'level_up': '#000000'}
+        names = {'daily_0': '0% Fait', 'daily_partial': '1-99% Fait', 'daily_100': '100% Fait', 'level_up': 'LEVEL UP'}
+        
+        for status_type in colors.keys():
+            subset = df[df['status'] == status_type]
+            if not subset.empty:
+                fig.add_trace(go.Scatter(
+                    x=subset['date'], 
+                    y=subset['xp_cumul'], 
+                    mode='markers', 
+                    marker=dict(color=colors[status_type], size=10, line=dict(width=1, color='white')),
+                    name=names[status_type]
+                ))
 
-        fig.update_layout(template="plotly_dark", height=350, margin=dict(l=20, r=20, t=20, b=20), showlegend=False)
+        fig.update_layout(
+            template="plotly_dark" if u["theme"] == "Sombre" else "plotly_white",
+            height=350,
+            margin=dict(l=20, r=20, t=20, b=20),
+            legend=dict(orientation="h", y=1.1)
+        )
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.write("En attente de données...")
-        
-    # Petit rappel des titres
-    with st.expander("Voir les Rangs"):
-        items_html = "".join([f'<div style="min-width:90px;text-align:center;opacity:{"1" if u["level"]>=l else "0.3"};margin-right:15px;"><div style="width:14px;height:14px;background:{"#333" if u["level"]<l else c};border-radius:50%;margin:0 auto;border:1px solid #555;"></div><p style="font-size:11px;color:{"#333" if u["level"]<l else c};margin-top:8px;font-weight:bold;">{n}</p><p style="font-size:9px;color:#666;">Niv.{l}</p></div>' for l,n,c in TITLES_DATA])
-        components.html(f'<style>body{{background:transparent;margin:0;}}.scroll{{display:flex;overflow-x:auto;padding:10px 5px;scrollbar-width:thin;}}</style><div class="scroll">{items_html}</div>', height=100)
+        st.write("Pas encore d'historique.")
 
 with tabs[2]:
-    # --- SECTION CONFIG ---
     st.subheader("Paramètres")
     
-    c_mode, c_add = st.columns([1, 2])
-    
+    c_theme, c_mode = st.columns(2)
+    with c_theme:
+        new_theme = st.radio("Thème Visuel", ["Sombre", "Clair"], index=["Sombre", "Clair"].index(u.get("theme", "Sombre")))
+        if new_theme != u.get("theme"):
+            u["theme"] = new_theme
+            save_data(u)
+            st.rerun()
+            
     with c_mode:
-        nm = st.radio("Difficulté", ["Séide", "Exalté"], index=["Séide", "Exalté"].index(u["mode"]), help="Exalté = Vous pouvez perdre de l'XP.")
+        nm = st.radio("Difficulté", ["Séide", "Exalté"], index=["Séide", "Exalté"].index(u["mode"]))
         if nm != u["mode"]: u["mode"] = nm; save_data(u); st.rerun()
 
-    with c_add:
-        st.write("**Ajouter une mission**")
-        with st.form("add_task"):
-            col_in, col_btn = st.columns([3, 1])
-            new_task = col_in.text_input("Intitulé", label_visibility="collapsed", placeholder="Ex: Lire 10 pages")
-            if col_btn.form_submit_button("Ajouter"):
-                if new_task:
-                    u["task_lists"]["Quotidiennes"].append(new_task)
-                    save_data(u)
-                    st.rerun()
-
     st.divider()
-    st.write("**Gérer les missions existantes**")
     
-    # Gestion simple de la liste
-    tasks_to_keep = []
-    has_changed = False
-    
+    # Ajout Tâche
+    with st.form("add"):
+        c_in, c_bt = st.columns([3, 1])
+        new_t = c_in.text_input("Nouvelle Quête", placeholder="Ex: Lire 10 pages")
+        if c_bt.form_submit_button("Ajouter") and new_t:
+            u["task_lists"]["Quotidiennes"].append(new_t)
+            save_data(u)
+            st.rerun()
+
+    # Gestion Tâches
+    st.write("Modifier / Supprimer")
+    to_keep = []
+    change = False
     for t in u["task_lists"]["Quotidiennes"]:
         c1, c2 = st.columns([4, 1])
-        new_name = c1.text_input("Nom", t, key=f"edit_{t}", label_visibility="collapsed")
-        
-        # Si on change le nom
-        if new_name != t:
-            tasks_to_keep.append(new_name)
-            has_changed = True
-        # Si on clique sur supprimer
-        elif c2.button("🗑️", key=f"del_conf_{t}"):
-            has_changed = True
-            # On ne l'ajoute pas à tasks_to_keep, donc elle saute
+        n_val = c1.text_input("Nom", t, key=f"ed_{t}", label_visibility="collapsed")
+        if n_val != t:
+            to_keep.append(n_val)
+            change = True
+        elif c2.button("🗑️", key=f"del_{t}"):
+            change = True
         else:
-            tasks_to_keep.append(t)
+            to_keep.append(t)
             
-    if has_changed:
-        u["task_lists"]["Quotidiennes"] = tasks_to_keep
+    if change:
+        u["task_lists"]["Quotidiennes"] = to_keep
         save_data(u)
         st.rerun()
 
+# --- SIDEBAR (Gestion du Temps) ---
 with st.sidebar:
     st.header("⏳ Temps")
     
-    if st.button("🌙 Fin de journée (Sauter)"):
-        # Calcul des pénalités si Exalté
-        if u['mode'] == "Exalté":
-            missed = [t for t in u["task_lists"]["Quotidiennes"] if t not in u["completed_quests"]]
-            if missed:
-                penalty = len(missed) * XP_PER_TASK
-                process_xp_change(-penalty, "Journée incomplète", "rouge")
+    if st.button("🌙 Fin de journée (Bilan)"):
+        # 1. Calcul du % de réalisation
+        total = len(u["task_lists"]["Quotidiennes"])
+        done_count = len(u["completed_quests"])
         
-        # Passage au lendemain
+        status_key = "daily_partial"
+        if total == 0: status_key = "daily_partial" # Cas vide
+        elif done_count == 0: status_key = "daily_0"
+        elif done_count == total: status_key = "daily_100"
+        else: status_key = "daily_partial"
+        
+        # 2. Sauvegarde Historique avec le bon statut pour la couleur
+        u["xp_history"].append({
+            "date": u["internal_date"],
+            "xp_cumul": get_total_cumulated_xp(u['level'], u['xp']),
+            "status": status_key
+        })
+        
+        # 3. Pénalité si Exalté
+        if u['mode'] == "Exalté":
+            missed = total - done_count
+            if missed > 0:
+                pen = missed * XP_PER_TASK
+                process_xp_change(-pen, "Journée incomplète")
+
+        # 4. Reset
         u["internal_date"] = (datetime.strptime(u["internal_date"], "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
-        u["completed_quests"] = [] # Reset des checkbox
+        u["completed_quests"] = []
         save_data(u)
         st.rerun()
-        
+
     st.divider()
-    if st.button("💀 HARD RESET"): 
+    if st.button("💀 HARD RESET"):
         save_data(get_default_data())
         st.rerun()
