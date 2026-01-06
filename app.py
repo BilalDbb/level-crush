@@ -51,7 +51,7 @@ def load_data():
             d = res.data[0]['data']
             if isinstance(d, str): d = json.loads(d)
             if "theme" not in d: d["theme"] = "Sombre"
-            # Nettoyage structurel
+            # Nettoyage
             if "task_diffs" in d: del d["task_diffs"]
             if "stats" in d: del d["stats"]
             return d
@@ -63,85 +63,107 @@ def save_data(data):
 
 u = load_data()
 
-# --- 4. CSS & THÈME ---
-# Palette plus douce et lisible
+# --- 4. CSS & THÈME (CORRIGÉ & HAUT CONTRASTE) ---
 PALETTE = {
     "Sombre": {
-        "bg": "#121212",           # Gris très foncé (pas noir complet)
-        "card_bg": "#2D2D2D",      # Gris anthracite
-        "text": "#E0E0E0",         # Blanc cassé (plus doux)
-        "sub_text": "#A0A0A0",
-        "border": "#404040",
-        "accent": "#00ADB5"        # Cyan soft
+        "bg": "#0E1117",           # Fond Streamlit standard foncé
+        "card_bg": "#262730",      # Carte Gris Soutenu (plus clair que le fond)
+        "text": "#FFFFFF",         # BLANC PUR
+        "sub_text": "#CCCCCC",     # Gris très clair
+        "border": "#41444C",       # Bordure visible
+        "accent": "#FF4B4B",       # Rouge Streamlit ou autre
+        "success": "#00CC96"       # Vert
     },
     "Clair": {
-        "bg": "#F5F7FA",
-        "card_bg": "#FFFFFF",
-        "text": "#2C3E50",
-        "sub_text": "#7F8C8D",
-        "border": "#E1E8ED",
-        "accent": "#2980B9"
+        "bg": "#FFFFFF",
+        "card_bg": "#F0F2F6",
+        "text": "#000000",
+        "sub_text": "#555555",
+        "border": "#D1D5DB",
+        "accent": "#FF4B4B",
+        "success": "#00CC96"
     }
 }
 P = PALETTE[u.get("theme", "Sombre")]
 
 st.set_page_config(page_title="LEVEL CRUSH", layout="wide")
 
+# Injection CSS agressif pour forcer les couleurs
 st.markdown(f"""
     <style>
-    /* Global Font & Colors */
-    @import url('https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@400;600&display=swap');
-    
-    html, body, [class*="css"] {{
+    /* Forçage global des textes */
+    html, body, .stMarkdown, .stText, h1, h2, h3, h4, h5, h6, p, li, span {{
+        color: {P['text']} !important;
         font-family: 'Source Sans Pro', sans-serif;
-        color: {P['text']};
     }}
+    
     .stApp {{
         background-color: {P['bg']};
     }}
     
-    /* Card Design */
+    /* Carte Tâche */
     .task-card {{
         background-color: {P['card_bg']};
         border: 1px solid {P['border']};
         border-radius: 8px;
-        padding: 15px;
-        margin-bottom: 12px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        padding: 12px 16px;
+        margin-bottom: 8px;
         display: flex;
         align-items: center;
+        /* Ombre légère pour détacher du fond */
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
     }}
     
-    /* Typography */
+    /* Titre Tâche */
     .task-title {{
-        font-size: 16px;
-        font-weight: 500;
-        color: {P['text']};
-        margin-left: 10px;
-    }}
-    .task-title-done {{
-        font-size: 16px;
-        color: {P['sub_text']}; /* Gris pour tâche finie */
-        margin-left: 10px;
+        font-size: 18px; /* Un peu plus gros */
+        font-weight: 600;
+        color: {P['text']} !important;
+        margin-left: 12px;
     }}
     
-    /* Buttons */
-    .stButton > button {{
+    .task-title-done {{
+        font-size: 18px;
+        font-weight: 400;
+        color: {P['sub_text']} !important;
+        text-decoration: none; /* Pas barré comme demandé */
+        margin-left: 12px;
+        opacity: 0.7;
+    }}
+    
+    /* Boutons */
+    div.stButton > button {{
         background-color: {P['card_bg']};
         color: {P['text']};
         border: 1px solid {P['border']};
-        border-radius: 6px;
-        transition: all 0.2s;
+        font-weight: bold;
     }}
-    .stButton > button:hover {{
-        border-color: {P['accent']};
-        color: {P['accent']};
+    div.stButton > button:hover {{
+        border-color: {P['text']};
+        color: {P['text']};
+        background-color: {P['border']};
     }}
     
-    /* Progress Bar */
-    .stProgress > div > div > div > div {{
-        background-color: {P['accent']};
+    /* Input Text */
+    div.stTextInput > div > div > input {{
+        background-color: {P['card_bg']};
+        color: {P['text']};
     }}
+    
+    /* Radio Buttons Label */
+    .stRadio label {{
+        color: {P['text']} !important;
+    }}
+    
+    /* Tabs */
+    button[data-baseweb="tab"] {{
+        color: {P['sub_text']};
+    }}
+    button[data-baseweb="tab"][aria-selected="true"] {{
+        color: {P['text']};
+        font-weight: bold;
+    }}
+
     </style>
     """, unsafe_allow_html=True)
 
@@ -149,7 +171,6 @@ st.markdown(f"""
 def process_xp_change(amount, task_name=None, type="action"):
     u['xp'] += amount
     
-    # Level Up
     leveled_up = False
     while True:
         req = get_xp_required(u['level'])
@@ -160,20 +181,17 @@ def process_xp_change(amount, task_name=None, type="action"):
             st.toast(f"🔥 LEVEL UP! NIVEAU {u['level']} 🔥")
         else: break
         
-    # Level Down (Exalté)
     if u['mode'] == "Exalté" and u['xp'] < 0 and u['level'] > 1:
         u['level'] -= 1
         u['xp'] += get_xp_required(u['level'])
         st.toast("📉 LEVEL DOWN...")
 
-    # Log
     time_str = datetime.now().strftime("%H:%M")
     if task_name:
         log_txt = f"{time_str} | {task_name} ({amount:+d} XP)"
         u["combat_log"].insert(0, log_txt)
         u["combat_log"] = u["combat_log"][:15]
     
-    # Historique Level Up
     if leveled_up:
         u["xp_history"].append({
             "date": u["internal_date"], 
@@ -182,21 +200,21 @@ def process_xp_change(amount, task_name=None, type="action"):
         })
 
 # --- 6. HEADER ---
-c_title, c_lvl = st.columns([3, 1])
+c_title, c_lvl = st.columns([2, 1])
 curr_l_req, title_name, title_color = get_current_title_info(u['level'])
 
 with c_title:
     st.title("⚔️ LEVEL CRUSH")
 
 with c_lvl:
+    # Utilisation de st.metric pour un rendu natif propre en haut à droite
     st.markdown(f"""
-    <div style="text-align:right; padding-top:10px;">
-        <span style="font-size:1.6em; font-weight:bold; color:{title_color};">NIV. {u['level']}</span><br>
-        <span style="font-size:0.9em; color:{P['sub_text']}; text-transform:uppercase; letter-spacing:1px;">{title_name}</span>
+    <div style="background:{P['card_bg']}; border:1px solid {P['border']}; border-radius:10px; padding:10px; text-align:center;">
+        <span style="color:{title_color}; font-size:1.4em; font-weight:bold;">NIV. {u['level']}</span><br>
+        <span style="color:{P['sub_text']}; font-size:0.8em; letter-spacing:1px;">{title_name.upper()}</span>
     </div>
     """, unsafe_allow_html=True)
 
-# Barre XP
 req_xp = get_xp_required(u['level'])
 progress = min(max(u['xp']/req_xp, 0.0), 1.0)
 st.progress(progress)
@@ -211,39 +229,40 @@ with tabs[0]:
         for i, t in enumerate(tsks):
             done = t in u["completed_quests"]
             
-            # Utilisation d'un container pour isoler la ligne
+            # Utilisation de container pour lier le CSS
             with st.container():
-                # On utilise des colonnes fixes pour éviter le décalage (Shift)
-                # Col 1 : Bouton (Action) ou Icone (Etat)
-                # Col 2 : Texte
-                c_btn, c_txt = st.columns([0.1, 0.9])
+                # Layout en colonnes fixes
+                # Col 1 (Petite) : Checkbox/Statut
+                # Col 2 (Grande) : Texte
+                c_btn, c_txt = st.columns([0.15, 0.85])
                 
                 with c_btn:
                     if not done:
-                        # Bouton vide pour valider
+                        # Bouton vide simple
                         if st.button("⬜", key=f"check_{i}"):
                             process_xp_change(XP_PER_TASK, t)
                             u["completed_quests"].append(t)
                             save_data(u)
                             st.rerun()
                     else:
-                        # Simple icône si fait (prend la même place que le bouton)
-                        st.markdown("<div style='text-align:center; padding-top:5px;'>✅</div>", unsafe_allow_html=True)
+                        # Icone centrée
+                        st.markdown(f"<div style='text-align:center; font-size:1.2em; color:{P['success']}; padding-top:8px;'>✔</div>", unsafe_allow_html=True)
                 
                 with c_txt:
-                    # Gestion du style du texte via CSS class
-                    if done:
-                        st.markdown(f"<div class='task-title-done'>{t}</div>", unsafe_allow_html=True)
-                    else:
-                        st.markdown(f"<div class='task-title'>{t}</div>", unsafe_allow_html=True)
-                
-                st.markdown(f"<hr style='margin:5px 0; border-color:{P['border']}; opacity:0.3;'>", unsafe_allow_html=True)
+                    # Affichage du texte
+                    # On utilise du HTML brut pour être sûr du rendu visuel
+                    # Padding top pour aligner avec le bouton
+                    style_class = "task-title-done" if done else "task-title"
+                    st.markdown(f"""
+                        <div class="task-card">
+                            <span class="{style_class}">{t}</span>
+                        </div>
+                    """, unsafe_allow_html=True)
                 
     else:
         st.info("Aucune quête active. Ajoutez-en via l'onglet Config.")
 
-    # Journal
-    with st.expander("📜 Journal de Bord (Dernières actions)"):
+    with st.expander("📜 Journal de Bord"):
         for log in u["combat_log"]:
             st.caption(log)
 
@@ -256,21 +275,17 @@ with tabs[1]:
         
         fig = go.Figure()
         
-        # Ligne principale
+        # Courbe principale (Blanche pour fort contraste)
         fig.add_trace(go.Scatter(
             x=df['date'], y=df['xp_cumul'], 
             mode='lines', 
-            line=dict(color=P['text'], width=2), 
+            line=dict(color=P['text'], width=3), 
             showlegend=False
         ))
         
-        # Config des points et légendes
-        # daily_0 = Aucune tâche
-        # daily_partial = Partiel
-        # daily_100 = 100%
-        # level_up = Noir (ou spécial)
-        
-        colors = {'daily_0': '#E74C3C', 'daily_partial': '#F39C12', 'daily_100': '#2ECC71', 'level_up': '#000000'}
+        # Points et Légende mise à jour
+        colors = {'daily_0': '#FF4B4B', 'daily_partial': '#FFAA00', 'daily_100': '#00CC96', 'level_up': '#FFFFFF'}
+        # Légendes renommées selon ta demande
         names = {
             'daily_0': 'Aucune tâche réalisée', 
             'daily_partial': 'Tâches partiellement réalisées', 
@@ -281,23 +296,25 @@ with tabs[1]:
         for status_type in colors.keys():
             subset = df[df['status'] == status_type]
             if not subset.empty:
-                # Bordure blanche autour des points pour qu'ils ressortent sur fond sombre
+                # Si Level Up, point noir avec bord blanc pour contraste max
+                line_color = '#000000' if status_type == 'level_up' else 'white'
+                fill_color = colors[status_type]
+                
                 fig.add_trace(go.Scatter(
                     x=subset['date'], 
                     y=subset['xp_cumul'], 
                     mode='markers', 
-                    marker=dict(color=colors[status_type], size=10, line=dict(width=2, color='white')),
+                    marker=dict(color=fill_color, size=12, line=dict(width=2, color=line_color)),
                     name=names[status_type]
                 ))
 
-        # Adaptation du graph au thème
         fig.update_layout(
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)',
-            font=dict(color=P['text']),
+            font=dict(color=P['text'], size=12),
             height=350,
             margin=dict(l=20, r=20, t=20, b=20),
-            legend=dict(orientation="h", y=1.1, font=dict(size=10)),
+            legend=dict(orientation="h", y=1.15),
             xaxis=dict(showgrid=False, linecolor=P['border']),
             yaxis=dict(showgrid=True, gridcolor=P['border'], zerolinecolor=P['border'])
         )
@@ -322,7 +339,6 @@ with tabs[2]:
 
     st.divider()
     
-    # Ajout Tâche
     with st.form("add"):
         c_in, c_bt = st.columns([3, 1])
         new_t = c_in.text_input("Nouvelle Quête", placeholder="Ex: Lire 10 pages")
@@ -331,7 +347,6 @@ with tabs[2]:
             save_data(u)
             st.rerun()
 
-    # Gestion Tâches
     st.write("Modifier / Supprimer")
     to_keep = []
     change = False
@@ -351,13 +366,10 @@ with tabs[2]:
         save_data(u)
         st.rerun()
 
-# --- SIDEBAR (Gestion du Temps) ---
 with st.sidebar:
     st.header("⏳ Temps")
     
-    # Bouton Fin de Journée
     if st.button("🌙 Fin de journée (Bilan)"):
-        # 1. Calcul Statut
         total = len(u["task_lists"]["Quotidiennes"])
         done_count = len(u["completed_quests"])
         
@@ -366,24 +378,20 @@ with st.sidebar:
             if done_count == 0: status_key = "daily_0"
             elif done_count == total: status_key = "daily_100"
             else: status_key = "daily_partial"
-        else:
-            status_key = "daily_partial" # Par défaut si pas de tâches
+        else: status_key = "daily_partial"
         
-        # 2. Sauvegarde Historique
         u["xp_history"].append({
             "date": u["internal_date"],
             "xp_cumul": get_total_cumulated_xp(u['level'], u['xp']),
             "status": status_key
         })
         
-        # 3. Pénalité Exalté
         if u['mode'] == "Exalté":
             missed = total - done_count
             if missed > 0:
                 pen = missed * XP_PER_TASK
                 process_xp_change(-pen, "Journée incomplète")
 
-        # 4. Passage au lendemain + Reset
         u["internal_date"] = (datetime.strptime(u["internal_date"], "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
         u["completed_quests"] = []
         save_data(u)
