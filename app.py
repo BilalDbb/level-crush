@@ -2,11 +2,25 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import datetime
+from supabase import create_client, Client
 
-# Configuration de la page
+# --- 1. CONFIGURATION & CONNEXION SUPABASE ---
 st.set_page_config(page_title="RPG Gestion", layout="centered")
 
-# --- 1. CSS & STYLES (CORRECTIFS VISUELS) ---
+# Fonction pour initialiser la connexion (mise en cache pour la perf)
+@st.cache_resource
+def init_connection():
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
+
+try:
+    supabase = init_connection()
+except Exception as e:
+    st.error(f"Erreur de connexion Supabase : {e}")
+    st.stop()
+
+# --- 2. CSS & STYLES (CORRECTIFS VISUELS) ---
 def inject_custom_css():
     st.markdown("""
     <style>
@@ -26,7 +40,6 @@ def inject_custom_css():
         align-items: center;
         transition: transform 0.2s ease-in-out;
     }
-    
     .quest-item:hover {
         transform: translateX(5px);
         box-shadow: 0 4px 8px rgba(0,0,0,0.1);
@@ -34,14 +47,12 @@ def inject_custom_css():
 
     /* === CORRECTIFS THÈME SOMBRE (DARK MODE) === */
     @media (prefers-color-scheme: dark) {
-        /* Carte Quête en sombre */
         .quest-item {
             background-color: #262730; /* Gris foncé Streamlit */
             color: #ffffff !important;
-            border-left: 6px solid #ffbd45; /* Orange pour le contraste */
-            border: 1px solid rgba(255,255,255,0.1); /* Légère bordure globale */
+            border-left: 6px solid #ffbd45; /* Orange contrasté */
+            border: 1px solid rgba(255,255,255,0.1);
         }
-        
         /* Journal de bord (Accordéon) - Force le texte blanc */
         .streamlit-expanderHeader {
             color: #ffffff !important;
@@ -50,8 +61,7 @@ def inject_custom_css():
         .streamlit-expanderContent p {
             color: #e0e0e0 !important;
         }
-
-        /* Boutons (pour qu'ils ne soient pas invisibles) */
+        /* Boutons visibles */
         button {
             border-color: rgba(255,255,255,0.2) !important;
         }
@@ -61,35 +71,50 @@ def inject_custom_css():
 
 inject_custom_css()
 
-# --- 2. GESTION DES DONNÉES (Session State) ---
-if 'taches' not in st.session_state:
-    st.session_state.taches = [
-        {"nom": "Faire 30min de sport", "xp": 10, "id": 1},
-        {"nom": "Lire 10 pages", "xp": 5, "id": 2}
-    ]
+# --- 3. GESTION DES DONNÉES (CRUD SUPABASE) ---
 
-if 'journal' not in st.session_state:
-    st.session_state.journal = [
-        "2023-10-25: Début de l'aventure.",
-        "2023-10-26: Sport accompli avec succès."
-    ]
+def get_taches():
+    """Récupère les tâches depuis Supabase"""
+    response = supabase.table("taches").select("*").execute()
+    return response.data
 
-# --- 3. INTERFACE PRINCIPALE ---
+def add_tache(nom, xp):
+    """Ajoute une tâche dans Supabase"""
+    # Pas besoin d'envoyer l'ID si ta colonne ID est en auto-increment (serial/identity)
+    data = {"nom": nom, "xp": xp, "created_at": str(datetime.datetime.now())}
+    supabase.table("taches").insert(data).execute()
+
+def delete_tache(tache_id):
+    """Supprime une tâche via son ID"""
+    supabase.table("taches").delete().eq("id", tache_id).execute()
+
+def add_log(message):
+    """Ajoute une entrée dans le journal"""
+    data = {"date": str(datetime.date.today()), "message": message}
+    supabase.table("journal").insert(data).execute()
+
+def get_journal():
+    """Récupère l'historique"""
+    response = supabase.table("journal").select("*").order("date", desc=True).execute()
+    return response.data
+
+# --- 4. INTERFACE PRINCIPALE ---
 st.title("🛡️ Tableau de Bord RPG")
 
-# Navigation par Onglets
+# Navigation
 tab1, tab2, tab3 = st.tabs(["📜 Quêtes", "⚙️ Config", "📊 Stats & Journal"])
 
 # === ONGLET 1 : QUÊTES ===
 with tab1:
     st.subheader("Quêtes actives")
     
-    if not st.session_state.taches:
+    # Chargement des données
+    taches = get_taches()
+    
+    if not taches:
         st.info("Aucune quête en cours. Va dans Config pour en ajouter !")
     
-    for tache in st.session_state.taches:
-        # Affichage HTML propre avec le style CSS .quest-item défini plus haut
-        # On utilise des colonnes pour mettre le bouton "Valider" (supprimer) à côté du visuel
+    for tache in taches:
         col_visuel, col_action = st.columns([5, 1])
         
         with col_visuel:
@@ -101,33 +126,29 @@ with tab1:
             """, unsafe_allow_html=True)
             
         with col_action:
-            # Centrage vertical approximatif pour le bouton
             st.write("") 
+            # Utilisation de l'ID unique de la base de données pour la clé
             if st.button("✅", key=f"btn_{tache['id']}", help="Valider la quête"):
-                st.session_state.taches.remove(tache)
-                st.session_state.journal.append(f"{datetime.date.today()}: Quête '{tache['nom']}' terminée.")
+                add_log(f"Quête '{tache['nom']}' terminée (+{tache['xp']} XP).")
+                delete_tache(tache['id'])
                 st.rerun()
 
 # === ONGLET 2 : CONFIGURATION ===
 with tab2:
     st.subheader("Ajouter une nouvelle quête")
     
-    # CORRECTION ALIGNEMENT : Utilisation de st.columns([4, 1])
-    # Le input prend 80% de la largeur, le bouton 20%
     c_input, c_btn = st.columns([4, 1])
     
     with c_input:
         new_task = st.text_input("Nom de la tâche", placeholder="Ex: Méditer 10 min", label_visibility="collapsed")
         
     with c_btn:
-        # Pas de label, juste le bouton. L'alignement se fait via les colonnes.
         btn_add = st.button("Ajouter", use_container_width=True)
 
     if btn_add:
         if new_task:
-            nouvelle_id = len(st.session_state.taches) + 100 # ID simple
-            st.session_state.taches.append({"nom": new_task, "xp": 10, "id": nouvelle_id})
-            st.success(f"Quête '{new_task}' ajoutée !")
+            add_tache(new_task, 10) # 10 XP par défaut
+            st.success(f"Quête '{new_task}' sauvegardée !")
             st.rerun()
         else:
             st.warning("Écris un nom de tâche d'abord.")
@@ -136,39 +157,36 @@ with tab2:
 with tab3:
     st.subheader("Journal de bord")
     
-    # Le CSS plus haut force la couleur du texte en blanc pour le mode sombre ici
+    logs = get_journal()
+    
     with st.expander("📖 Voir l'historique (Journal)", expanded=False):
-        for log in st.session_state.journal:
-            st.write(f"- {log}")
+        if logs:
+            for log in logs:
+                st.write(f"- **{log['date']}**: {log['message']}")
+        else:
+            st.write("Le journal est vide.")
 
     st.divider()
     
     st.subheader("Statistiques")
     
-    # Exemple de graphique Matplotlib avec correction pour le mode sombre
-    # (Si tu utilises st.bar_chart, c'est automatique, mais voici pour Matplotlib)
-    
+    # Données fictives (à connecter à Supabase si tu as une table 'stats')
     data = {'Force': 20, 'Intel': 35, 'Endu': 15, 'Charisme': 10}
     names = list(data.keys())
     values = list(data.values())
 
-    # Détection basique du thème (optionnel, ou forcer style sombre si besoin)
-    # L'astuce ici est de configurer les couleurs manuellement pour être sûr
+    # Config Matplotlib "Thème-Proof"
     fig, ax = plt.subplots(figsize=(6, 3))
-    
-    # Fond transparent pour s'adapter au thème Streamlit
     fig.patch.set_alpha(0) 
     ax.patch.set_alpha(0)
     
-    # Couleurs des barres et du texte
-    bars = ax.bar(names, values, color='#4a90e2')
+    ax.bar(names, values, color='#4a90e2')
     
-    # Changement couleur des axes et du texte pour la lisibilité (blanc/gris clair)
-    ax.tick_params(colors='gray', which='both')  # Couleur des ticks
+    TEXT_COLOR = '#909090' 
+    ax.tick_params(colors=TEXT_COLOR, which='both')
     for spine in ax.spines.values():
-        spine.set_edgecolor('gray') # Couleur des bordures du graph
-    
-    # Si tu as une légende ou un titre
-    ax.set_title("Répartition des Stats", color='gray')
+        spine.set_edgecolor(TEXT_COLOR)
+        
+    ax.set_title("Répartition des Stats", color=TEXT_COLOR)
     
     st.pyplot(fig)
