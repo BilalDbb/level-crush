@@ -9,17 +9,16 @@ st.set_page_config(page_title="Level Crush", layout="centered")
 
 @st.cache_resource
 def init_connection():
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
-    return create_client(url, key)
+    try:
+        url = st.secrets["SUPABASE_URL"]
+        key = st.secrets["SUPABASE_KEY"]
+        return create_client(url, key)
+    except:
+        return None
 
-try:
-    supabase = init_connection()
-except Exception as e:
-    st.error(f"Erreur de connexion Supabase : {e}")
-    st.stop()
+supabase = init_connection()
 
-# --- 2. CSS & STYLES ---
+# --- 2. CSS & STYLES (Mode sombre + Cartes + Alignement) ---
 def inject_custom_css():
     st.markdown("""
     <style>
@@ -52,6 +51,7 @@ def inject_custom_css():
             border-left: 6px solid #ffbd45;
             border: 1px solid rgba(255,255,255,0.1);
         }
+        /* Force le texte du journal (accordéon) en blanc */
         .streamlit-expanderHeader {
             color: #ffffff !important;
             background-color: #262730 !important;
@@ -59,6 +59,7 @@ def inject_custom_css():
         .streamlit-expanderContent p {
             color: #e0e0e0 !important;
         }
+        /* Boutons visibles */
         button {
             border-color: rgba(255,255,255,0.2) !important;
         }
@@ -71,41 +72,51 @@ inject_custom_css()
 # --- 3. FONCTIONS BDD ---
 
 def get_taches():
-    response = supabase.table("taches").select("*").execute()
+    if not supabase: return []
+    response = supabase.table("taches").select("*").order("id").execute()
     return response.data
 
 def add_tache(nom, xp):
+    if not supabase: return
     data = {"nom": nom, "xp": xp}
     supabase.table("taches").insert(data).execute()
 
 def delete_tache(tache_id):
+    if not supabase: return
     supabase.table("taches").delete().eq("id", tache_id).execute()
 
 def add_log(message):
+    if not supabase: return
     data = {"date": str(datetime.date.today()), "message": message}
     supabase.table("journal").insert(data).execute()
 
 def get_journal():
+    if not supabase: return []
     response = supabase.table("journal").select("*").order("date", desc=True).execute()
     return response.data
 
-# --- 4. INTERFACE ---
+def reset_all_data():
+    """Supprime toutes les données (Reset/Hard Restart)"""
+    if not supabase: return
+    # Suppression de toutes les lignes (attention: nécessite que la policy le permette)
+    supabase.table("taches").delete().neq("id", 0).execute()
+    supabase.table("journal").delete().neq("id", 0).execute()
 
-# TITRE : J'ai mis "Level Crush" par défaut. Change-le ici si c'était autre chose.
+# --- 4. INTERFACE PRINCIPALE ---
 st.title("Level Crush")
 
-tab1, tab2, tab3 = st.tabs(["📜 Quêtes", "⚙️ Config", "📊 Stats & Journal"])
+if not supabase:
+    st.error("Erreur de connexion Supabase. Vérifie tes secrets.")
+    st.stop()
+
+# RESTAURATION DES ONGLETS DEMANDÉS
+tab_quetes, tab_progression, tab_config = st.tabs(["📜 Quêtes", "📈 Progression", "⚙️ Config"])
 
 # === ONGLET 1 : QUÊTES ===
-with tab1:
+with tab_quetes:
     st.subheader("Quêtes actives")
     
-    # C'est ici que ça plantait si la table n'existait pas
-    try:
-        taches = get_taches()
-    except Exception as e:
-        st.error("Erreur BDD: As-tu créé les tables dans Supabase ?")
-        taches = []
+    taches = get_taches()
     
     if not taches:
         st.info("Aucune quête en cours.")
@@ -126,9 +137,61 @@ with tab1:
                 delete_tache(tache['id'])
                 st.rerun()
 
-# === ONGLET 2 : CONFIGURATION ===
-with tab2:
-    st.subheader("Ajouter une nouvelle quête")
+# === ONGLET 2 : PROGRESSION (Restauré) ===
+with tab_progression:
+    st.subheader("Statistiques du héros")
+    
+    # Données fictives (à adapter si tu as une table stats)
+    data = {'Force': 20, 'Intel': 35, 'Endu': 15, 'Charisme': 10}
+    names = list(data.keys())
+    values = list(data.values())
+
+    # --- GRAPHIQUE MATPLOTLIB (Correction Mode Sombre + Légende) ---
+    fig, ax = plt.subplots(figsize=(6, 3))
+    fig.patch.set_alpha(0) 
+    ax.patch.set_alpha(0)
+    
+    bar_colors = ['#e74c3c', '#3498db', '#2ecc71', '#f1c40f']
+    ax.bar(names, values, color=bar_colors)
+    
+    # Couleur du texte adaptative (Gris clair lisible sur sombre et clair)
+    TEXT_COLOR = '#A0A0A0' 
+    ax.tick_params(colors=TEXT_COLOR, which='both')
+    for spine in ax.spines.values():
+        spine.set_edgecolor(TEXT_COLOR)
+    
+    ax.set_title("Répartition des attributs", color=TEXT_COLOR)
+    
+    # Légende manuelle pour être sûr qu'elle soit visible
+    # On crée une légende fictive pour l'exemple
+    from matplotlib.patches import Patch
+    legend_elements = [Patch(facecolor=c, label=n) for c, n in zip(bar_colors, names)]
+    
+    # Correction visibilité légende
+    leg = ax.legend(handles=legend_elements, loc='upper right', frameon=False)
+    for text in leg.get_texts():
+        text.set_color(TEXT_COLOR)
+
+    st.pyplot(fig)
+
+    st.divider()
+    
+    st.subheader("Journal de bord")
+    logs = get_journal()
+    
+    # Le CSS 'dark-mode' s'applique ici pour la visibilité
+    with st.expander("📖 Voir l'historique complet", expanded=False):
+        if logs:
+            for log in logs:
+                st.write(f"- **{log['date']}**: {log['message']}")
+        else:
+            st.write("Le journal est vide.")
+
+# === ONGLET 3 : CONFIGURATION (Boutons restaurés) ===
+with tab_config:
+    st.subheader("Ajouter une quête")
+    
+    # Alignement Input + Bouton Ajouter
     c_input, c_btn = st.columns([4, 1])
     with c_input:
         new_task = st.text_input("Nom de la tâche", placeholder="Ex: Méditer", label_visibility="collapsed")
@@ -140,36 +203,28 @@ with tab2:
         st.success(f"Quête '{new_task}' sauvegardée !")
         st.rerun()
 
-# === ONGLET 3 : STATS ===
-with tab3:
-    st.subheader("Journal de bord")
-    try:
-        logs = get_journal()
-    except:
-        logs = []
-        
-    with st.expander("📖 Voir l'historique", expanded=False):
-        if logs:
-            for log in logs:
-                st.write(f"- **{log['date']}**: {log['message']}")
-        else:
-            st.write("Vide.")
-
     st.divider()
-    st.subheader("Statistiques")
+    st.subheader("Gestion du temps & Reset")
     
-    data = {'Force': 20, 'Intel': 35, 'Endu': 15, 'Charisme': 10}
-    names = list(data.keys())
-    values = list(data.values())
-
-    fig, ax = plt.subplots(figsize=(6, 3))
-    fig.patch.set_alpha(0) 
-    ax.patch.set_alpha(0)
-    ax.bar(names, values, color='#4a90e2')
+    # RESTAURATION DES BOUTONS DE GESTION
+    col1, col2, col3 = st.columns(3)
     
-    TEXT_COLOR = '#909090' 
-    ax.tick_params(colors=TEXT_COLOR, which='both')
-    for spine in ax.spines.values():
-        spine.set_edgecolor(TEXT_COLOR)
-    ax.set_title("Répartition des Stats", color=TEXT_COLOR)
-    st.pyplot(fig)
+    with col1:
+        if st.button("⏩ Sauter un jour", use_container_width=True):
+            add_log("Journée sautée (Repos).")
+            st.success("Jour passé !")
+            st.rerun()
+            
+    with col2:
+        if st.button("🔄 Reset", type="primary", use_container_width=True):
+            reset_all_data()
+            st.warning("Données réinitialisées.")
+            st.rerun()
+            
+    with col3:
+        if st.button("💀 Hard Restart", type="primary", use_container_width=True):
+            reset_all_data()
+            # Ici on pourrait ajouter une logique plus aggressive si besoin
+            add_log("HARD RESTART EFFECTUÉ.")
+            st.error("Système redémarré à zéro.")
+            st.rerun()
