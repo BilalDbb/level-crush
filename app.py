@@ -3,6 +3,24 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from datetime import datetime, timedelta
+from supabase import create_client, Client
+
+# --- CONFIGURATION SUPABASE ---
+# Le code va chercher les infos dans le fichier .streamlit/secrets.toml (LOCAL)
+# OU dans les Secrets de Streamlit Cloud (EN LIGNE)
+try:
+    SUPABASE_URL = st.secrets["SUPABASE_URL"]
+    SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    DB_CONNECTED = True
+except Exception as e:
+    DB_CONNECTED = False
+    # On n'affiche l'erreur que si on est en local pour ne pas effrayer l'utilisateur final
+    st.warning("Base de données non connectée. Vérifiez le fichier .streamlit/secrets.toml")
+
+# Nom de la table et ID utilisateur
+TABLE_NAME = "profiles" 
+USER_ID = "shadow_monarch_01"
 
 # --- CONFIGURATION DE LA PAGE ---
 st.set_page_config(page_title="Task RPG", page_icon="⚔️")
@@ -34,35 +52,76 @@ st.markdown("""
         margin-bottom: 10px;
         border-left: 5px solid #ccc;
     }
-    /* Masquer le menu hamburger standard pour faire plus "App" */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
 
+# --- GESTION PERSISTANCE (SUPABASE) ---
+
+def load_data_from_db():
+    """Charge les données JSON depuis Supabase dans le session_state"""
+    if not DB_CONNECTED: return
+    
+    try:
+        response = supabase.table(TABLE_NAME).select("data").eq("user_id", USER_ID).execute()
+        
+        if response.data and len(response.data) > 0:
+            # Données trouvées, on peuple le session_state
+            data = response.data[0]['data']
+            st.session_state.tasks = data.get('tasks', [])
+            st.session_state.logs = data.get('logs', [])
+            st.session_state.user_xp = data.get('user_xp', 0)
+            st.session_state.user_lvl = data.get('user_lvl', 1)
+            st.session_state.game_mode = data.get('game_mode', "Séide")
+            st.session_state.current_date = data.get('current_date', datetime.today().strftime("%Y-%m-%d"))
+        else:
+            # Pas de données, on initialise une ligne vide
+            save_data_to_db() 
+            
+    except Exception as e:
+        st.error(f"Erreur chargement DB: {e}")
+
+def save_data_to_db():
+    """Sauvegarde tout l'état actuel dans la colonne JSONB"""
+    if not DB_CONNECTED: return
+
+    # On prépare le payload JSON
+    payload = {
+        "tasks": st.session_state.get('tasks', []),
+        "logs": st.session_state.get('logs', []),
+        "user_xp": st.session_state.get('user_xp', 0),
+        "user_lvl": st.session_state.get('user_lvl', 1),
+        "game_mode": st.session_state.get('game_mode', "Séide"),
+        "current_date": st.session_state.get('current_date', datetime.today().strftime("%Y-%m-%d"))
+    }
+    
+    try:
+        # Upsert: met à jour si user_id existe, sinon crée
+        supabase.table(TABLE_NAME).upsert({
+            "user_id": USER_ID,
+            "data": payload
+        }).execute()
+    except Exception as e:
+        st.error(f"Erreur sauvegarde DB: {e}")
+
+
 # --- INITIALISATION SESSION STATE ---
-if 'tasks' not in st.session_state:
-    # Structure: id, name (XP et Mode sont gérés globalement/fixe maintenant)
+if 'data_loaded' not in st.session_state:
+    # Valeurs par défaut (écrasées si DB répond)
     st.session_state.tasks = []
-
-if 'logs' not in st.session_state:
-    # Structure: date (str), tasks_completed (list of ids), xp_at_end_of_day (int), status (100, partial, 0)
     st.session_state.logs = []
-
-if 'user_xp' not in st.session_state:
     st.session_state.user_xp = 0
-
-if 'user_lvl' not in st.session_state:
     st.session_state.user_lvl = 1
-
-if 'game_mode' not in st.session_state:
-    st.session_state.game_mode = "Séide" # Default
-
-if 'current_date' not in st.session_state:
+    st.session_state.game_mode = "Séide"
     st.session_state.current_date = datetime.today().strftime("%Y-%m-%d")
+    
+    # Tentative de chargement DB au lancement
+    load_data_from_db()
+    st.session_state.data_loaded = True
 
 # --- CONSTANTES ---
-FIXED_TASK_XP = 20 # Valeur fixe par défaut pour l'instant
+FIXED_TASK_XP = 20 
 
 # --- FONCTIONS LOGIQUES ---
 
@@ -70,8 +129,6 @@ def get_current_rank_info():
     lvl = st.session_state.user_lvl
     current_title = "Inconnu"
     current_color = "#000000"
-    
-    # On parcourt la liste pour trouver le titre actif le plus élevé
     for t_lvl, t_name, t_color in TITLES:
         if lvl >= t_lvl:
             current_title = t_name
@@ -81,7 +138,6 @@ def get_current_rank_info():
     return current_title, current_color
 
 def get_max_slots():
-    # 5 slots au niveau 1 + 1 slot tous les 10 niveaux
     return 5 + (st.session_state.user_lvl // 10)
 
 def get_tasks():
@@ -91,22 +147,17 @@ def add_task(name):
     if len(st.session_state.tasks) >= get_max_slots():
         return False, "Nombre maximum de slots atteint pour votre niveau !"
     
-    new_id = len(st.session_state.tasks) + 1 # Simple ID generation
-    # En cas de suppression, l'ID peut être dupliqué avec cette méthode simple, 
-    # mais suffisant pour la démo sans BDD réelle.
+    new_id = len(st.session_state.tasks) + 1 
     if st.session_state.tasks:
         new_id = max([t['id'] for t in st.session_state.tasks]) + 1
         
     st.session_state.tasks.append({"id": new_id, "name": name})
+    save_data_to_db() # SAVE
     return True, "Tâche ajoutée."
 
 def delete_task(task_id):
     st.session_state.tasks = [t for t in st.session_state.tasks if t['id'] != task_id]
-
-def update_task(task_id, new_name):
-    for t in st.session_state.tasks:
-        if t['id'] == task_id:
-            t['name'] = new_name
+    save_data_to_db() # SAVE
 
 def get_daily_log(date):
     for log in st.session_state.logs:
@@ -117,7 +168,6 @@ def get_daily_log(date):
 def validate_task(task_id, date):
     log = get_daily_log(date)
     if not log:
-        # Création du log du jour s'il n'existe pas
         log = {
             "date": date, 
             "tasks_completed": [], 
@@ -129,25 +179,20 @@ def validate_task(task_id, date):
     if task_id not in log['tasks_completed']:
         log['tasks_completed'].append(task_id)
         st.session_state.user_xp += FIXED_TASK_XP
-        log['xp_snapshot'] = st.session_state.user_xp # Update snapshot
+        log['xp_snapshot'] = st.session_state.user_xp 
         check_levelup(date)
+        save_data_to_db() # SAVE
 
 def check_levelup(date):
     required_xp = st.session_state.user_lvl * 100
     if st.session_state.user_xp >= required_xp:
         st.session_state.user_lvl += 1
-        st.session_state.user_xp -= required_xp # Reset barre XP (keep surplus)
-        
-        # Log le level up
+        st.session_state.user_xp -= required_xp 
         log = get_daily_log(date)
         if log: log['level_up'] = True
         st.balloons()
 
 def apply_exalte_penalty(log_entry):
-    """
-    Applique la pénalité si le mode est Exalté et que la journée est passée/validée
-    sans 100% de réussite.
-    """
     if st.session_state.game_mode == "Exalté":
         total_tasks = len(st.session_state.tasks)
         completed = len(log_entry['tasks_completed'])
@@ -157,20 +202,15 @@ def apply_exalte_penalty(log_entry):
             penalty = missed * FIXED_TASK_XP
             
             st.session_state.user_xp -= penalty
-            # Gestion de la descente de niveau
             if st.session_state.user_xp < 0:
                 if st.session_state.user_lvl > 1:
                     st.session_state.user_lvl -= 1
-                    # On remet l'XP au max du niveau précédent moins la dette
                     st.session_state.user_xp = (st.session_state.user_lvl * 100) + st.session_state.user_xp
                 else:
-                    st.session_state.user_xp = 0 # Pas de niveau 0
+                    st.session_state.user_xp = 0
 
 def skip_day():
-    """Simule le passage au jour suivant et applique les règles de fin de journée"""
     current_log = get_daily_log(st.session_state.current_date)
-    
-    # Si pas de log pour aujourd'hui, on en crée un vide pour marquer l'échec (0 tâches)
     if not current_log:
         current_log = {
             "date": st.session_state.current_date, 
@@ -180,24 +220,19 @@ def skip_day():
         }
         st.session_state.logs.append(current_log)
     
-    # Appliquer pénalité Exalté sur la journée qui se termine
     apply_exalte_penalty(current_log)
-    
-    # Mettre à jour le snapshot XP final après pénalité
     current_log['xp_snapshot'] = st.session_state.user_xp
 
-    # Avancer la date
     curr = datetime.strptime(st.session_state.current_date, "%Y-%m-%d")
     st.session_state.current_date = (curr + timedelta(days=1)).strftime("%Y-%m-%d")
-
+    save_data_to_db() # SAVE
 
 # --- UI LAYOUT ---
 
-# 1. EN-TÊTE (Rank & Progress)
+# 1. EN-TÊTE
 title_name, title_color = get_current_rank_info()
 st.markdown(f"<h3 style='text-align: center; color: {title_color};'>Niveau {st.session_state.user_lvl} - {title_name}</h3>", unsafe_allow_html=True)
 
-# Barre de progression XP
 xp_needed = st.session_state.user_lvl * 100
 progress_val = min(st.session_state.user_xp / xp_needed, 1.0)
 st.progress(progress_val)
@@ -218,9 +253,7 @@ with tabs[0]:
         st.info("Aucune tâche active. Configurez vos slots.")
     
     for task in tasks:
-        # Container style card
         col_name, col_btn = st.columns([0.7, 0.3])
-        
         is_done = task['id'] in completed_ids
         
         with col_name:
@@ -241,7 +274,6 @@ with tabs[0]:
 with tabs[1]:
     st.header("Configuration")
     
-    # Choix du mode global
     st.subheader("Mode de Jeu")
     current_mode_index = 0 if st.session_state.game_mode == "Séide" else 1
     new_mode = st.radio(
@@ -252,11 +284,11 @@ with tabs[1]:
     )
     if new_mode != st.session_state.game_mode:
         st.session_state.game_mode = new_mode
+        save_data_to_db() # SAVE
         st.success(f"Mode changé en {new_mode}")
 
     st.divider()
 
-    # Gestion des tâches
     st.subheader(f"Slots de Tâches ({len(st.session_state.tasks)}/{get_max_slots()})")
     
     with st.form("add_task_form", clear_on_submit=True):
@@ -274,14 +306,12 @@ with tabs[1]:
             else:
                 st.error(msg)
     
-    # Liste tâches existantes
     if st.session_state.tasks:
         for task in st.session_state.tasks:
             c1, c2, c3 = st.columns([0.6, 0.2, 0.2])
             with c1:
                 st.write(f"- {task['name']}")
             with c2:
-                # Edition simple via popover ou expander serait mieux mais on reste simple
                 pass 
             with c3:
                 if st.button("🗑️", key=f"del_{task['id']}"):
@@ -290,7 +320,6 @@ with tabs[1]:
     
     st.divider()
     
-    # Affichage des Rangs
     with st.expander("Voir les Rangs & Titres"):
         for t_lvl, t_name, t_color in TITLES:
             if st.session_state.user_lvl >= t_lvl:
@@ -300,7 +329,6 @@ with tabs[1]:
 
     st.divider()
     
-    # Dev Tools
     with st.expander("Dev Tools"):
         c1, c2 = st.columns(2)
         with c1:
@@ -308,8 +336,12 @@ with tabs[1]:
                 skip_day()
                 st.rerun()
         with c2:
-            if st.button("HARD RESET", type="primary"):
-                st.session_state.clear()
+            if st.button("HARD RESET DB", type="primary"):
+                st.session_state.tasks = []
+                st.session_state.logs = []
+                st.session_state.user_xp = 0
+                st.session_state.user_lvl = 1
+                save_data_to_db()
                 st.rerun()
 
 # --- TAB PROGRESSION ---
@@ -322,9 +354,6 @@ with tabs[2]:
         df_logs['date_dt'] = pd.to_datetime(df_logs['date'])
         df_logs = df_logs.sort_values('date_dt')
         
-        # Calcul du % pour déterminer la couleur du point
-        # Attention: pour l'historique, il faudrait stocker le nb de taches ce jour là.
-        # Ici on approxime avec le nb actuel de taches.
         current_total_tasks = max(len(st.session_state.tasks), 1)
         
         def get_status_color(row):
@@ -335,7 +364,6 @@ with tabs[2]:
             
         df_logs['color'] = df_logs.apply(get_status_color, axis=1)
 
-        # -- Interactive Legend (Streamlit widgets) --
         st.caption("Filtres du graphique :")
         col_l1, col_l2, col_l3, col_l4, col_l5 = st.columns(5)
         
@@ -345,26 +373,21 @@ with tabs[2]:
         show_0 = col_l4.checkbox("🔴 Aucune tâche", True)
         show_lvlup = col_l5.checkbox("⚫ Lvl Up !", True)
 
-        # -- Matplotlib Plot --
         with plt.xkcd():
             fig, ax = plt.subplots(figsize=(10, 6))
             
-            # 1. Courbe XP (Bleue)
             if show_curve:
                 ax.plot(df_logs['date_dt'], df_logs['xp_snapshot'], color='blue', alpha=0.5, linewidth=2)
             
-            # 2. Points de status
             for _, row in df_logs.iterrows():
                 date_val = row['date_dt']
                 xp_val = row['xp_snapshot']
                 color = row['color']
                 is_lvl_up = row['level_up']
                 
-                # Level Up Marker
                 if is_lvl_up and show_lvlup:
                      ax.scatter([date_val], [xp_val], color='black', s=200, marker='*', zorder=10)
                 
-                # Daily Status Marker
                 if color == 'green' and show_100:
                     ax.scatter([date_val], [xp_val], color='green', s=100, zorder=5)
                 elif color == 'orange' and show_mid:
@@ -374,8 +397,6 @@ with tabs[2]:
 
             ax.set_ylabel("XP Totale")
             ax.set_xlabel("Date")
-            
-            # Retrait du cadre supérieur et droit pour faire plus "clean"
             ax.spines['top'].set_visible(False)
             ax.spines['right'].set_visible(False)
             
@@ -386,9 +407,10 @@ with tabs[2]:
             st.pyplot(fig)
             
     else:
-        st.info("Aucune donnée disponible. Validez des tâches ou sautez un jour pour voir le graphique.")
+        st.info("Synchronisation DB... ou aucune donnée disponible.")
 
-# --- DEPENDANCES ---
+# --- DEPENDANCES (requirements.txt) ---
 # streamlit
 # pandas
 # matplotlib
+# supabase
