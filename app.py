@@ -37,14 +37,29 @@ TITLES = [
     (93, "Souverain", "#8E44AD"), (100, "LEVEL CRUSHER", "#000000")
 ]
 
-# --- STYLE CSS ---
+# --- STYLE CSS (POLICE MANUSCRITE) ---
 st.markdown("""
 <style>
+    /* Import de la police style "main" */
+    @import url('https://fonts.googleapis.com/css2?family=Patrick+Hand&display=swap');
+
+    /* Application à toute l'interface */
+    html, body, [class*="css"] {
+        font-family: 'Patrick Hand', cursive;
+    }
+    
+    /* Ajustement de la taille pour la lisibilité de cette police spécifique */
+    p, label, .stMarkdown {
+        font-size: 1.1rem !important;
+    }
+
     .stButton>button {
         width: 100%;
         border-radius: 10px;
         font-weight: bold;
+        font-family: 'Patrick Hand', cursive; /* Force sur les boutons */
     }
+    
     .task-container {
         padding: 15px;
         border-radius: 10px;
@@ -231,7 +246,7 @@ def skip_day():
 
 # 1. EN-TÊTE
 title_name, title_color = get_current_rank_info()
-st.markdown(f"<h3 style='text-align: center; color: {title_color};'>Niveau {st.session_state.user_lvl} - {title_name}</h3>", unsafe_allow_html=True)
+st.markdown(f"<h3 style='text-align: center; color: {title_color}; font-family: Patrick Hand, cursive;'>Niveau {st.session_state.user_lvl} - {title_name}</h3>", unsafe_allow_html=True)
 
 xp_needed = st.session_state.user_lvl * 100
 progress_val = min(st.session_state.user_xp / xp_needed, 1.0)
@@ -269,6 +284,25 @@ with tabs[0]:
                 if st.button("Valider", key=f"val_{task['id']}"):
                     validate_task(task['id'], st.session_state.current_date)
                     st.rerun()
+
+    st.divider()
+
+    # --- DEV TOOLS (Déplacé ici) ---
+    with st.expander("👨‍💻 Dev Tools (Test Zone)"):
+        st.warning("Zone développeur")
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Sauter un jour (Skip + Penalty Check)"):
+                skip_day()
+                st.rerun()
+        with c2:
+            if st.button("HARD RESET DB", type="primary"):
+                st.session_state.tasks = []
+                st.session_state.logs = []
+                st.session_state.user_xp = 0
+                st.session_state.user_lvl = 1
+                save_data_to_db()
+                st.rerun()
 
 # --- TAB CONFIG ---
 with tabs[1]:
@@ -326,23 +360,6 @@ with tabs[1]:
                 st.markdown(f"<span style='color:{t_color}'><b>Lvl {t_lvl} : {t_name}</b></span>", unsafe_allow_html=True)
             else:
                 st.markdown(f"<span style='color:#ccc'>Lvl {t_lvl} : ???</span>", unsafe_allow_html=True)
-
-    st.divider()
-    
-    with st.expander("Dev Tools"):
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("Sauter un jour (Skip + Penalty Check)"):
-                skip_day()
-                st.rerun()
-        with c2:
-            if st.button("HARD RESET DB", type="primary"):
-                st.session_state.tasks = []
-                st.session_state.logs = []
-                st.session_state.user_xp = 0
-                st.session_state.user_lvl = 1
-                save_data_to_db()
-                st.rerun()
 
 # --- TAB PROGRESSION ---
 with tabs[2]:
