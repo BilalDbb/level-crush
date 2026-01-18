@@ -6,8 +6,6 @@ from datetime import datetime, timedelta
 from supabase import create_client, Client
 
 # --- CONFIGURATION SUPABASE ---
-# Le code va chercher les infos dans le fichier .streamlit/secrets.toml (LOCAL)
-# OU dans les Secrets de Streamlit Cloud (EN LIGNE)
 try:
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
     SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
@@ -15,7 +13,6 @@ try:
     DB_CONNECTED = True
 except Exception as e:
     DB_CONNECTED = False
-    # On n'affiche l'erreur que si on est en local pour ne pas effrayer l'utilisateur final
     st.warning("Base de données non connectée. Vérifiez le fichier .streamlit/secrets.toml")
 
 # Nom de la table et ID utilisateur
@@ -40,15 +37,12 @@ TITLES = [
 # --- STYLE CSS (POLICE MANUSCRITE) ---
 st.markdown("""
 <style>
-    /* Import de la police style "main" */
     @import url('https://fonts.googleapis.com/css2?family=Patrick+Hand&display=swap');
 
-    /* Application à toute l'interface */
     html, body, [class*="css"] {
         font-family: 'Patrick Hand', cursive;
     }
     
-    /* Ajustement de la taille pour la lisibilité de cette police spécifique */
     p, label, .stMarkdown {
         font-size: 1.1rem !important;
     }
@@ -57,7 +51,7 @@ st.markdown("""
         width: 100%;
         border-radius: 10px;
         font-weight: bold;
-        font-family: 'Patrick Hand', cursive; /* Force sur les boutons */
+        font-family: 'Patrick Hand', cursive; 
     }
     
     .task-container {
@@ -82,7 +76,6 @@ def load_data_from_db():
         response = supabase.table(TABLE_NAME).select("data").eq("user_id", USER_ID).execute()
         
         if response.data and len(response.data) > 0:
-            # Données trouvées, on peuple le session_state
             data = response.data[0]['data']
             st.session_state.tasks = data.get('tasks', [])
             st.session_state.logs = data.get('logs', [])
@@ -91,7 +84,6 @@ def load_data_from_db():
             st.session_state.game_mode = data.get('game_mode', "Séide")
             st.session_state.current_date = data.get('current_date', datetime.today().strftime("%Y-%m-%d"))
         else:
-            # Pas de données, on initialise une ligne vide
             save_data_to_db() 
             
     except Exception as e:
@@ -101,7 +93,6 @@ def save_data_to_db():
     """Sauvegarde tout l'état actuel dans la colonne JSONB"""
     if not DB_CONNECTED: return
 
-    # On prépare le payload JSON
     payload = {
         "tasks": st.session_state.get('tasks', []),
         "logs": st.session_state.get('logs', []),
@@ -112,7 +103,6 @@ def save_data_to_db():
     }
     
     try:
-        # Upsert: met à jour si user_id existe, sinon crée
         supabase.table(TABLE_NAME).upsert({
             "user_id": USER_ID,
             "data": payload
@@ -123,7 +113,6 @@ def save_data_to_db():
 
 # --- INITIALISATION SESSION STATE ---
 if 'data_loaded' not in st.session_state:
-    # Valeurs par défaut (écrasées si DB répond)
     st.session_state.tasks = []
     st.session_state.logs = []
     st.session_state.user_xp = 0
@@ -131,12 +120,44 @@ if 'data_loaded' not in st.session_state:
     st.session_state.game_mode = "Séide"
     st.session_state.current_date = datetime.today().strftime("%Y-%m-%d")
     
-    # Tentative de chargement DB au lancement
     load_data_from_db()
     st.session_state.data_loaded = True
 
-# --- CONSTANTES ---
-FIXED_TASK_XP = 20 
+# --- CONSTANTES & LOGIQUE XP ---
+FIXED_TASK_XP = 229
+
+def get_level_cost(level):
+    """
+    Calcule le coût en XP pour compléter le niveau 'level' (passer de level à level+1).
+    Formule: Coeff * (niveau^1.2)
+    """
+    exponent = 1.2
+    coeff = 30
+    
+    if level <= 5:
+        coeff = 150
+    elif 6 <= level <= 10:
+        coeff = 80
+    
+    return coeff * (level ** exponent)
+
+def get_total_xp_required(target_level):
+    """
+    Calcule l'XP TOTAL cumulé requis pour atteindre le 'target_level'.
+    """
+    if target_level == 1:
+        return 0
+    
+    # Règle spéciale lvl 100
+    if target_level == 100:
+        return get_total_xp_required(99) * 2
+        
+    total = 0
+    # On somme les coûts de tous les niveaux précédents
+    for lvl in range(1, target_level):
+        total += get_level_cost(lvl)
+        
+    return total
 
 # --- FONCTIONS LOGIQUES ---
 
@@ -167,18 +188,35 @@ def add_task(name):
         new_id = max([t['id'] for t in st.session_state.tasks]) + 1
         
     st.session_state.tasks.append({"id": new_id, "name": name})
-    save_data_to_db() # SAVE
+    save_data_to_db() 
     return True, "Tâche ajoutée."
 
 def delete_task(task_id):
     st.session_state.tasks = [t for t in st.session_state.tasks if t['id'] != task_id]
-    save_data_to_db() # SAVE
+    save_data_to_db()
 
 def get_daily_log(date):
     for log in st.session_state.logs:
         if log['date'] == date:
             return log
     return None
+
+def check_levelup(date):
+    """Vérifie si l'XP totale permet de monter de niveau."""
+    current_lvl = st.session_state.user_lvl
+    # On boucle au cas où on gagne plusieurs niveaux d'un coup
+    while True:
+        xp_needed_next = get_total_xp_required(current_lvl + 1)
+        if st.session_state.user_xp >= xp_needed_next:
+            current_lvl += 1
+            # Pas de ballons
+        else:
+            break
+            
+    if current_lvl > st.session_state.user_lvl:
+        st.session_state.user_lvl = current_lvl
+        log = get_daily_log(date)
+        if log: log['level_up'] = True
 
 def validate_task(task_id, date):
     log = get_daily_log(date)
@@ -193,21 +231,16 @@ def validate_task(task_id, date):
     
     if task_id not in log['tasks_completed']:
         log['tasks_completed'].append(task_id)
+        # Gain XP cumulative
         st.session_state.user_xp += FIXED_TASK_XP
         log['xp_snapshot'] = st.session_state.user_xp 
         check_levelup(date)
-        save_data_to_db() # SAVE
-
-def check_levelup(date):
-    required_xp = st.session_state.user_lvl * 100
-    if st.session_state.user_xp >= required_xp:
-        st.session_state.user_lvl += 1
-        st.session_state.user_xp -= required_xp 
-        log = get_daily_log(date)
-        if log: log['level_up'] = True
-        st.balloons()
+        save_data_to_db()
 
 def apply_exalte_penalty(log_entry):
+    """
+    En mode Exalté, retire l'XP équivalent au gain pour chaque tâche ratée.
+    """
     if st.session_state.game_mode == "Exalté":
         total_tasks = len(st.session_state.tasks)
         completed = len(log_entry['tasks_completed'])
@@ -218,11 +251,16 @@ def apply_exalte_penalty(log_entry):
             
             st.session_state.user_xp -= penalty
             if st.session_state.user_xp < 0:
-                if st.session_state.user_lvl > 1:
+                st.session_state.user_xp = 0
+            
+            # Gestion de la perte de niveau (Level Down)
+            # Si l'XP passe sous le seuil du niveau actuel
+            while st.session_state.user_lvl > 1:
+                threshold_current = get_total_xp_required(st.session_state.user_lvl)
+                if st.session_state.user_xp < threshold_current:
                     st.session_state.user_lvl -= 1
-                    st.session_state.user_xp = (st.session_state.user_lvl * 100) + st.session_state.user_xp
                 else:
-                    st.session_state.user_xp = 0
+                    break
 
 def skip_day():
     current_log = get_daily_log(st.session_state.current_date)
@@ -240,7 +278,7 @@ def skip_day():
 
     curr = datetime.strptime(st.session_state.current_date, "%Y-%m-%d")
     st.session_state.current_date = (curr + timedelta(days=1)).strftime("%Y-%m-%d")
-    save_data_to_db() # SAVE
+    save_data_to_db()
 
 # --- UI LAYOUT ---
 
@@ -248,10 +286,19 @@ def skip_day():
 title_name, title_color = get_current_rank_info()
 st.markdown(f"<h3 style='text-align: center; color: {title_color}; font-family: Patrick Hand, cursive;'>Niveau {st.session_state.user_lvl} - {title_name}</h3>", unsafe_allow_html=True)
 
-xp_needed = st.session_state.user_lvl * 100
-progress_val = min(st.session_state.user_xp / xp_needed, 1.0)
+# Barre de progression (Calculée relative au niveau en cours)
+current_level_floor = get_total_xp_required(st.session_state.user_lvl)
+next_level_ceiling = get_total_xp_required(st.session_state.user_lvl + 1)
+xp_in_level = st.session_state.user_xp - current_level_floor
+xp_needed_for_level = next_level_ceiling - current_level_floor
+
+if xp_needed_for_level > 0:
+    progress_val = min(max(xp_in_level / xp_needed_for_level, 0.0), 1.0)
+else:
+    progress_val = 1.0
+
 st.progress(progress_val)
-st.caption(f"XP: {st.session_state.user_xp} / {xp_needed}")
+st.caption(f"XP: {int(st.session_state.user_xp)} / {int(next_level_ceiling)} (Total)")
 
 # 2. TABS
 tabs = st.tabs(["📜 Quête", "🛠 Config", "📈 Progression"])
@@ -287,7 +334,7 @@ with tabs[0]:
 
     st.divider()
 
-    # --- DEV TOOLS (Déplacé ici) ---
+    # --- DEV TOOLS ---
     with st.expander("👨‍💻 Dev Tools (Test Zone)"):
         st.warning("Zone développeur")
         c1, c2 = st.columns(2)
@@ -318,7 +365,7 @@ with tabs[1]:
     )
     if new_mode != st.session_state.game_mode:
         st.session_state.game_mode = new_mode
-        save_data_to_db() # SAVE
+        save_data_to_db() 
         st.success(f"Mode changé en {new_mode}")
 
     st.divider()
