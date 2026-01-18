@@ -57,18 +57,18 @@ st.markdown("""
     /* Design Note Manuscrite Réaliste */
     .quote-container {
         position: relative;
-        margin: 20px auto;
+        margin: 10px auto; /* Marges réduites */
         width: 90%;
     }
     
     .quote-box {
         background-color: #fdfbf7; /* Blanc cassé papier */
-        padding: 30px;
+        padding: 15px; /* Padding réduit (était 30px) */
         color: #2c2c2c;
         /* Bordure asymétrique pour effet papier */
         border-radius: 255px 15px 225px 15px / 15px 225px 15px 255px;
         box-shadow: 
-            2px 5px 15px rgba(0,0,0,0.1), /* Ombre portée */
+            2px 3px 10px rgba(0,0,0,0.1), /* Ombre portée plus douce */
             inset 0 0 20px rgba(0,0,0,0.02); /* Texture interne */
         border: 1px solid #e0e0e0;
         position: relative;
@@ -76,16 +76,16 @@ st.markdown("""
     }
     
     .quote-text {
-        font-size: 1.4rem;
+        font-size: 1.1rem; /* Police réduite (était 1.4rem) */
         font-style: italic;
         text-align: center;
-        margin-bottom: 15px;
-        line-height: 1.4;
+        margin-bottom: 10px; /* Marge interne réduite */
+        line-height: 1.3;
     }
     
     .quote-author {
         text-align: right;
-        font-size: 1rem;
+        font-size: 0.9rem; /* Auteur un peu plus discret */
         color: #666;
         font-weight: bold;
     }
@@ -93,10 +93,10 @@ st.markdown("""
     /* Croix de fermeture style gribouillage */
     .close-btn {
         position: absolute;
-        top: 10px;
-        right: 15px;
+        top: 5px; /* Ajusté pour le nouveau padding */
+        right: 10px;
         cursor: pointer;
-        font-size: 1.2rem;
+        font-size: 1rem;
         color: #999;
         font-weight: bold;
         border: none;
@@ -373,8 +373,6 @@ def skip_day():
 if st.session_state.active_quote:
     q = st.session_state.active_quote
     
-    # On utilise st.columns pour superposer la croix de fermeture
-    # Mais le HTML est plus simple pour le style exact
     st.markdown(f"""
     <div class="quote-container">
         <div class="quote-box">
@@ -384,7 +382,6 @@ if st.session_state.active_quote:
     </div>
     """, unsafe_allow_html=True)
     
-    # Petit bouton discret pour fermer (centré sous la note ou aligné à droite)
     col_close, _ = st.columns([0.2, 0.8])
     with col_close:
         if st.button("✕ Fermer", key="close_quote_btn"):
