@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import random
+import json
 from datetime import datetime, timedelta
 from supabase import create_client, Client
 
@@ -18,6 +19,7 @@ except Exception as e:
 # Nom de la table et ID utilisateur
 TABLE_NAME = "profiles" 
 USER_ID = "shadow_monarch_01"
+APP_VERSION = "v1.0.0"
 
 # --- CONFIGURATION DE LA PAGE ---
 st.set_page_config(page_title="Task RPG", page_icon="⚔️")
@@ -43,7 +45,7 @@ st.markdown("""
         font-family: 'Patrick Hand', cursive;
     }
     
-    p, label, .stMarkdown, .stAlert, .stSelectbox, .stNumberInput {
+    p, label, .stMarkdown, .stAlert, .stSelectbox, .stNumberInput, .stCheckbox {
         font-size: 1.1rem !important;
     }
 
@@ -57,43 +59,41 @@ st.markdown("""
     /* Design Note Manuscrite Réaliste */
     .quote-container {
         position: relative;
-        margin: 10px auto; /* Marges réduites */
+        margin: 10px auto; 
         width: 90%;
     }
     
     .quote-box {
-        background-color: #fdfbf7; /* Blanc cassé papier */
-        padding: 15px; /* Padding réduit (était 30px) */
+        background-color: #fdfbf7; 
+        padding: 15px; 
         color: #2c2c2c;
-        /* Bordure asymétrique pour effet papier */
         border-radius: 255px 15px 225px 15px / 15px 225px 15px 255px;
         box-shadow: 
-            2px 3px 10px rgba(0,0,0,0.1), /* Ombre portée plus douce */
-            inset 0 0 20px rgba(0,0,0,0.02); /* Texture interne */
+            2px 3px 10px rgba(0,0,0,0.1), 
+            inset 0 0 20px rgba(0,0,0,0.02); 
         border: 1px solid #e0e0e0;
         position: relative;
-        transform: rotate(-1deg); /* Légère rotation naturelle */
+        transform: rotate(-1deg); 
     }
     
     .quote-text {
-        font-size: 1.1rem; /* Police réduite (était 1.4rem) */
+        font-size: 1.1rem; 
         font-style: italic;
         text-align: center;
-        margin-bottom: 10px; /* Marge interne réduite */
+        margin-bottom: 10px; 
         line-height: 1.3;
     }
     
     .quote-author {
         text-align: right;
-        font-size: 0.9rem; /* Auteur un peu plus discret */
+        font-size: 0.9rem; 
         color: #666;
         font-weight: bold;
     }
     
-    /* Croix de fermeture style gribouillage */
     .close-btn {
         position: absolute;
-        top: 5px; /* Ajusté pour le nouveau padding */
+        top: 5px;
         right: 10px;
         cursor: pointer;
         font-size: 1rem;
@@ -137,6 +137,7 @@ def load_data_from_db():
             st.session_state.current_date = data.get('current_date', datetime.today().strftime("%Y-%m-%d"))
             st.session_state.user_gender = data.get('user_gender', "Non précisé")
             st.session_state.user_birth_year = data.get('user_birth_year', 2000)
+            st.session_state.user_consent = data.get('user_consent', False)
         else:
             save_data_to_db() 
             
@@ -155,7 +156,8 @@ def save_data_to_db():
         "game_mode": st.session_state.get('game_mode', "Séide"),
         "current_date": st.session_state.get('current_date', datetime.today().strftime("%Y-%m-%d")),
         "user_gender": st.session_state.get('user_gender', "Non précisé"),
-        "user_birth_year": st.session_state.get('user_birth_year', 2000)
+        "user_birth_year": st.session_state.get('user_birth_year', 2000),
+        "user_consent": st.session_state.get('user_consent', False)
     }
     
     try:
@@ -172,7 +174,7 @@ def reset_user_data():
     st.session_state.logs = []
     st.session_state.user_xp = 0
     st.session_state.user_lvl = 1
-    # On garde le mode de jeu, la date et le profil
+    # On garde le mode de jeu, la date, le profil et le consentement
     save_data_to_db()
 
 # --- GESTION CITATIONS ---
@@ -212,6 +214,7 @@ if 'data_loaded' not in st.session_state:
     st.session_state.current_date = datetime.today().strftime("%Y-%m-%d")
     st.session_state.user_gender = "Non précisé"
     st.session_state.user_birth_year = 2000
+    st.session_state.user_consent = False
     
     st.session_state.active_quote = None 
     st.session_state.reset_step = 0
@@ -526,21 +529,8 @@ with tabs[1]:
 # --- TAB CONFIGURATION ---
 with tabs[2]:
     st.header("Configuration")
-    
-    st.subheader("Mon Profil")
-    c_genre, c_annee = st.columns(2)
-    with c_genre:
-        new_gender = st.selectbox("Genre", ["Homme", "Femme", "Autre", "Non précisé"], index=["Homme", "Femme", "Autre", "Non précisé"].index(st.session_state.user_gender) if st.session_state.user_gender in ["Homme", "Femme", "Autre", "Non précisé"] else 3)
-    with c_annee:
-        new_year = st.number_input("Année de naissance", min_value=1900, max_value=2025, value=st.session_state.user_birth_year)
-    
-    if new_gender != st.session_state.user_gender or new_year != st.session_state.user_birth_year:
-        st.session_state.user_gender = new_gender
-        st.session_state.user_birth_year = new_year
-        save_data_to_db()
 
-    st.divider()
-
+    # 1. Mode de Jeu (En haut)
     st.subheader("Mode de Jeu")
     current_mode_index = 0 if st.session_state.game_mode == "Séide" else 1
     new_mode = st.radio(
@@ -556,6 +546,7 @@ with tabs[2]:
 
     st.divider()
 
+    # 2. Slots de Tâches
     st.subheader(f"Slots de Tâches ({len(st.session_state.tasks)}/{get_max_slots()})")
     
     with st.form("add_task_form", clear_on_submit=True):
@@ -598,17 +589,71 @@ with tabs[2]:
                         st.rerun()
     
     st.divider()
+
+    # 3. Mon Profil (En dessous)
+    st.subheader("Mon Profil")
+    c_genre, c_annee = st.columns(2)
+    with c_genre:
+        new_gender = st.selectbox("Genre", ["Homme", "Femme", "Autre", "Non précisé"], index=["Homme", "Femme", "Autre", "Non précisé"].index(st.session_state.user_gender) if st.session_state.user_gender in ["Homme", "Femme", "Autre", "Non précisé"] else 3)
+    with c_annee:
+        new_year = st.number_input("Année de naissance", min_value=1900, max_value=2025, value=st.session_state.user_birth_year)
     
-    with st.expander("Voir les Rangs & Titres"):
-        for t_lvl, t_name, t_color in TITLES:
-            if st.session_state.user_lvl >= t_lvl:
-                st.markdown(f"<span style='color:{t_color}'><b>Lvl {t_lvl} : {t_name}</b></span>", unsafe_allow_html=True)
-            else:
-                st.markdown(f"<span style='color:#ccc'>Lvl {t_lvl} : ???</span>", unsafe_allow_html=True)
+    if new_gender != st.session_state.user_gender or new_year != st.session_state.user_birth_year:
+        st.session_state.user_gender = new_gender
+        st.session_state.user_birth_year = new_year
+        save_data_to_db()
 
     st.divider()
 
-    # --- ZONE DANGER (RESET USER) ---
+    # 4. Infos & Légal
+    with st.expander("ℹ️ Informations & Légal"):
+        st.caption(f"Version : {APP_VERSION}")
+        
+        # Consentement
+        consent = st.checkbox("J'accepte de recevoir des notifications et communications liées à l'application.", value=st.session_state.user_consent)
+        if consent != st.session_state.user_consent:
+            st.session_state.user_consent = consent
+            save_data_to_db()
+            if consent:
+                st.success("Préférence enregistrée.")
+
+        st.markdown("---")
+        st.markdown("#### Mentions Légales & Confidentialité")
+        st.caption("""
+        **Données collectées :** Nous stockons vos tâches, votre niveau, votre historique d'XP ainsi que les informations de profil (genre, année) pour le fonctionnement du jeu et l'amélioration de l'expérience.
+        
+        **Stockage :** Vos données sont hébergées de manière sécurisée sur Supabase.
+        
+        **Droit à l'oubli :** Vous pouvez réinitialiser votre progression via la zone de danger ci-dessous. Pour une suppression définitive de compte, contactez le support.
+        """)
+        
+        st.markdown("#### Support")
+        st.write("Un problème ? Une suggestion ?")
+        st.markdown("[Contacter le support](mailto:support@taskrpg.com)")
+
+        st.markdown("---")
+        st.markdown("#### Export de données")
+        # Export JSON simple
+        user_data_json = json.dumps({
+            "tasks": st.session_state.tasks,
+            "logs": st.session_state.logs,
+            "xp": st.session_state.user_xp,
+            "profile": {
+                "gender": st.session_state.user_gender,
+                "birth_year": st.session_state.user_birth_year
+            }
+        }, indent=2)
+        
+        st.download_button(
+            label="📥 Exporter mes données (JSON)",
+            data=user_data_json,
+            file_name=f"taskrpg_export_{USER_ID}.json",
+            mime="application/json"
+        )
+
+    st.divider()
+
+    # 5. Zone Danger (Tout en bas)
     st.markdown("### ☠️ Zone de Danger")
     if st.button("🔴 TOUT RECOMMENCER (Reset Aventure)"):
         st.session_state.reset_step = 1
