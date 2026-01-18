@@ -34,7 +34,7 @@ TITLES = [
     (93, "Souverain", "#8E44AD"), (100, "LEVEL CRUSHER", "#000000")
 ]
 
-# --- STYLE CSS (POLICE MANUSCRITE & DESIGN ÉPURÉ) ---
+# --- STYLE CSS (POLICE MANUSCRITE & DESIGN PAPIER) ---
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Patrick+Hand&display=swap');
@@ -54,23 +54,32 @@ st.markdown("""
         font-family: 'Patrick Hand', cursive; 
     }
     
-    /* Design épuré pour la citation */
+    /* Design Papier Déchiré */
     .quote-box {
-        padding: 20px;
-        border: 2px dashed #555; /* Bordure pointillée style dessin */
-        border-radius: 15px;
-        background-color: #ffffff; /* Fond blanc propre */
+        position: relative;
+        background-color: #fffdf0; /* Couleur papier beige clair */
+        padding: 25px;
         margin-bottom: 20px;
-        box-shadow: 3px 3px 0px rgba(0,0,0,0.1); /* Légère ombre dure */
+        box-shadow: 3px 3px 10px rgba(0,0,0,0.1); /* Ombre douce */
+        /* Effet bord déchiré en bas via clip-path */
+        clip-path: polygon(
+            0% 0%, 100% 0%, 100% 100%, 
+            95% 98%, 90% 100%, 85% 98%, 80% 100%, 
+            75% 98%, 70% 100%, 65% 98%, 60% 100%, 
+            55% 98%, 50% 100%, 45% 98%, 40% 100%, 
+            35% 98%, 30% 100%, 25% 98%, 20% 100%, 
+            15% 98%, 10% 100%, 5% 98%, 0% 100%
+        );
     }
     .quote-text {
-        font-size: 1.5rem;
-        color: #333;
+        font-size: 1.3rem; /* Légèrement plus petit */
+        font-style: italic;
+        color: #4a4a4a; /* Gris foncé style encre/crayon */
         text-align: center;
+        line-height: 1.5;
     }
     .quote-author {
         text-align: right;
-        font-weight: bold;
         margin-top: 15px;
         color: #777;
         font-size: 1rem;
@@ -105,7 +114,6 @@ def load_data_from_db():
             st.session_state.user_lvl = data.get('user_lvl', 1)
             st.session_state.game_mode = data.get('game_mode', "Séide")
             st.session_state.current_date = data.get('current_date', datetime.today().strftime("%Y-%m-%d"))
-            # Profiling
             st.session_state.user_gender = data.get('user_gender', "Non précisé")
             st.session_state.user_birth_year = data.get('user_birth_year', 2000)
         else:
@@ -165,13 +173,12 @@ def get_random_quote(quote_type):
         print(f"❌ Erreur fetch citation: {e}")
         return None
 
-def set_active_quote(quote_data, context_color="#ffc107"):
+def set_active_quote(quote_data):
     """Active une citation pour l'afficher à l'utilisateur"""
     if quote_data:
         st.session_state.active_quote = {
             "text": quote_data['text'],
-            "author": quote_data['author'],
-            "color": context_color
+            "author": quote_data['author']
         }
 
 # --- INITIALISATION SESSION STATE ---
@@ -275,7 +282,7 @@ def check_levelup(date):
         if log: log['level_up'] = True
         
         quote = get_random_quote("reussite")
-        set_active_quote(quote, "#2ECC71")
+        set_active_quote(quote)
 
 def validate_task(task_id, date):
     log = get_daily_log(date)
@@ -333,7 +340,7 @@ def skip_day():
     completed = len(current_log['tasks_completed'])
     if total_tasks > 0 and completed < total_tasks:
         quote = get_random_quote("echec")
-        set_active_quote(quote, "#E74C3C") 
+        set_active_quote(quote) 
 
     curr = datetime.strptime(st.session_state.current_date, "%Y-%m-%d")
     st.session_state.current_date = (curr + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -341,7 +348,7 @@ def skip_day():
 
 # --- UI LAYOUT ---
 
-# 0. AFFICHAGE CITATION ACTIVE
+# 0. AFFICHAGE CITATION ACTIVE (Style Papier)
 if st.session_state.active_quote:
     q = st.session_state.active_quote
     st.markdown(f"""
@@ -371,8 +378,8 @@ else:
 st.progress(progress_val)
 st.caption(f"XP: {int(st.session_state.user_xp)} / {int(next_level_ceiling)} (Total)")
 
-# 2. TABS
-tabs = st.tabs(["📜 Quête", "🛠 Config", "📈 Progression"])
+# 2. TABS (Nouvel ordre)
+tabs = st.tabs(["📜 Quête", "📈 Progression", "🛠 Configuration"])
 
 # --- TAB QUÊTE ---
 with tabs[0]:
@@ -418,14 +425,79 @@ with tabs[0]:
                 test_type = "reussite"
                 q = get_random_quote(test_type)
                 if q:
-                    set_active_quote(q, "#9B59B6") 
+                    set_active_quote(q) 
                     st.success(f"Connexion OK ! Citation chargée.")
                     st.rerun()
                 else:
-                    st.error("Échec connexion. Vérifiez si RLS est 'Disabled' sur la table 'citations' dans Supabase.")
+                    st.error("Échec connexion.")
 
-# --- TAB CONFIG ---
+# --- TAB PROGRESSION (Déplacé ici) ---
 with tabs[1]:
+    st.header("Graphique")
+    
+    df_logs = pd.DataFrame(st.session_state.logs)
+    
+    if not df_logs.empty:
+        df_logs['date_dt'] = pd.to_datetime(df_logs['date'])
+        df_logs = df_logs.sort_values('date_dt')
+        
+        current_total_tasks = max(len(st.session_state.tasks), 1)
+        
+        def get_status_color(row):
+            count = len(row['tasks_completed'])
+            if count == 0: return 'red'
+            if count >= current_total_tasks: return 'green'
+            return 'orange'
+            
+        df_logs['color'] = df_logs.apply(get_status_color, axis=1)
+
+        st.caption("Filtres du graphique :")
+        col_l1, col_l2, col_l3, col_l4, col_l5 = st.columns(5)
+        
+        show_curve = col_l1.checkbox("🟦 Courbe", True)
+        show_100 = col_l2.checkbox("🟢 Tâches réalisées", True)
+        show_mid = col_l3.checkbox("🟠 Tâches partielles", True)
+        show_0 = col_l4.checkbox("🔴 Aucune tâche", True)
+        show_lvlup = col_l5.checkbox("⚫ Lvl Up !", True)
+
+        with plt.xkcd():
+            fig, ax = plt.subplots(figsize=(10, 6))
+            
+            if show_curve:
+                ax.plot(df_logs['date_dt'], df_logs['xp_snapshot'], color='blue', alpha=0.5, linewidth=2)
+            
+            for _, row in df_logs.iterrows():
+                date_val = row['date_dt']
+                xp_val = row['xp_snapshot']
+                color = row['color']
+                is_lvl_up = row['level_up']
+                
+                if is_lvl_up and show_lvlup:
+                     ax.scatter([date_val], [xp_val], color='black', s=200, marker='*', zorder=10)
+                
+                if color == 'green' and show_100:
+                    ax.scatter([date_val], [xp_val], color='green', s=100, zorder=5)
+                elif color == 'orange' and show_mid:
+                    ax.scatter([date_val], [xp_val], color='orange', s=100, zorder=5)
+                elif color == 'red' and show_0:
+                    ax.scatter([date_val], [xp_val], color='red', s=100, zorder=5)
+
+            ax.set_ylabel("XP Totale")
+            ax.set_xlabel("Date")
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            
+            fig.autofmt_xdate()
+            fig.patch.set_alpha(0)
+            ax.patch.set_alpha(0)
+            
+            st.pyplot(fig)
+            
+    else:
+        st.info("Synchronisation DB... ou aucune donnée disponible.")
+
+# --- TAB CONFIGURATION (Déplacé à la fin) ---
+with tabs[2]:
     st.header("Configuration")
     
     st.subheader("Mon Profil")
@@ -460,7 +532,6 @@ with tabs[1]:
     st.subheader(f"Slots de Tâches ({len(st.session_state.tasks)}/{get_max_slots()})")
     
     with st.form("add_task_form", clear_on_submit=True):
-        # Alignement vertical BAS pour que le bouton soit en face du champ
         col_in, col_sub = st.columns([0.7, 0.3], vertical_alignment="bottom")
         with col_in:
             new_task_name = st.text_input("Nouvelle tâche", placeholder="Ex: Faire 50 pompes")
@@ -529,71 +600,6 @@ with tabs[1]:
             if st.button("❌ ANNULER"):
                 st.session_state.reset_step = 0
                 st.rerun()
-
-# --- TAB PROGRESSION ---
-with tabs[2]:
-    st.header("Graphique")
-    
-    df_logs = pd.DataFrame(st.session_state.logs)
-    
-    if not df_logs.empty:
-        df_logs['date_dt'] = pd.to_datetime(df_logs['date'])
-        df_logs = df_logs.sort_values('date_dt')
-        
-        current_total_tasks = max(len(st.session_state.tasks), 1)
-        
-        def get_status_color(row):
-            count = len(row['tasks_completed'])
-            if count == 0: return 'red'
-            if count >= current_total_tasks: return 'green'
-            return 'orange'
-            
-        df_logs['color'] = df_logs.apply(get_status_color, axis=1)
-
-        st.caption("Filtres du graphique :")
-        col_l1, col_l2, col_l3, col_l4, col_l5 = st.columns(5)
-        
-        show_curve = col_l1.checkbox("🟦 Courbe", True)
-        show_100 = col_l2.checkbox("🟢 Tâches réalisées", True)
-        show_mid = col_l3.checkbox("🟠 Tâches partielles", True)
-        show_0 = col_l4.checkbox("🔴 Aucune tâche", True)
-        show_lvlup = col_l5.checkbox("⚫ Lvl Up !", True)
-
-        with plt.xkcd():
-            fig, ax = plt.subplots(figsize=(10, 6))
-            
-            if show_curve:
-                ax.plot(df_logs['date_dt'], df_logs['xp_snapshot'], color='blue', alpha=0.5, linewidth=2)
-            
-            for _, row in df_logs.iterrows():
-                date_val = row['date_dt']
-                xp_val = row['xp_snapshot']
-                color = row['color']
-                is_lvl_up = row['level_up']
-                
-                if is_lvl_up and show_lvlup:
-                     ax.scatter([date_val], [xp_val], color='black', s=200, marker='*', zorder=10)
-                
-                if color == 'green' and show_100:
-                    ax.scatter([date_val], [xp_val], color='green', s=100, zorder=5)
-                elif color == 'orange' and show_mid:
-                    ax.scatter([date_val], [xp_val], color='orange', s=100, zorder=5)
-                elif color == 'red' and show_0:
-                    ax.scatter([date_val], [xp_val], color='red', s=100, zorder=5)
-
-            ax.set_ylabel("XP Totale")
-            ax.set_xlabel("Date")
-            ax.spines['top'].set_visible(False)
-            ax.spines['right'].set_visible(False)
-            
-            fig.autofmt_xdate()
-            fig.patch.set_alpha(0)
-            ax.patch.set_alpha(0)
-            
-            st.pyplot(fig)
-            
-    else:
-        st.info("Synchronisation DB... ou aucune donnée disponible.")
 
 # --- DEPENDANCES (requirements.txt) ---
 # streamlit
