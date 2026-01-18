@@ -34,7 +34,7 @@ TITLES = [
     (93, "Souverain", "#8E44AD"), (100, "LEVEL CRUSHER", "#000000")
 ]
 
-# --- STYLE CSS (POLICE MANUSCRITE) ---
+# --- STYLE CSS (POLICE MANUSCRITE & DESIGN ÉPURÉ) ---
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Patrick+Hand&display=swap');
@@ -43,7 +43,7 @@ st.markdown("""
         font-family: 'Patrick Hand', cursive;
     }
     
-    p, label, .stMarkdown, .stAlert {
+    p, label, .stMarkdown, .stAlert, .stSelectbox, .stNumberInput {
         font-size: 1.1rem !important;
     }
 
@@ -54,24 +54,26 @@ st.markdown("""
         font-family: 'Patrick Hand', cursive; 
     }
     
+    /* Design épuré pour la citation */
     .quote-box {
         padding: 20px;
-        border-radius: 10px;
-        background-color: #fff3cd;
-        border-left: 5px solid #ffc107;
+        border: 2px dashed #555; /* Bordure pointillée style dessin */
+        border-radius: 15px;
+        background-color: #ffffff; /* Fond blanc propre */
         margin-bottom: 20px;
-        box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+        box-shadow: 3px 3px 0px rgba(0,0,0,0.1); /* Légère ombre dure */
     }
     .quote-text {
-        font-size: 1.4rem;
-        font-style: italic;
-        color: #555;
+        font-size: 1.5rem;
+        color: #333;
+        text-align: center;
     }
     .quote-author {
         text-align: right;
         font-weight: bold;
-        margin-top: 10px;
-        color: #333;
+        margin-top: 15px;
+        color: #777;
+        font-size: 1rem;
     }
     
     .task-container {
@@ -103,6 +105,9 @@ def load_data_from_db():
             st.session_state.user_lvl = data.get('user_lvl', 1)
             st.session_state.game_mode = data.get('game_mode', "Séide")
             st.session_state.current_date = data.get('current_date', datetime.today().strftime("%Y-%m-%d"))
+            # Profiling
+            st.session_state.user_gender = data.get('user_gender', "Non précisé")
+            st.session_state.user_birth_year = data.get('user_birth_year', 2000)
         else:
             save_data_to_db() 
             
@@ -119,7 +124,9 @@ def save_data_to_db():
         "user_xp": st.session_state.get('user_xp', 0),
         "user_lvl": st.session_state.get('user_lvl', 1),
         "game_mode": st.session_state.get('game_mode', "Séide"),
-        "current_date": st.session_state.get('current_date', datetime.today().strftime("%Y-%m-%d"))
+        "current_date": st.session_state.get('current_date', datetime.today().strftime("%Y-%m-%d")),
+        "user_gender": st.session_state.get('user_gender', "Non précisé"),
+        "user_birth_year": st.session_state.get('user_birth_year', 2000)
     }
     
     try:
@@ -136,7 +143,7 @@ def reset_user_data():
     st.session_state.logs = []
     st.session_state.user_xp = 0
     st.session_state.user_lvl = 1
-    # On garde le mode de jeu et la date pour éviter des bugs bizarres
+    # On garde le mode de jeu, la date et le profil
     save_data_to_db()
 
 # --- GESTION CITATIONS ---
@@ -146,14 +153,12 @@ def get_random_quote(quote_type):
     if not DB_CONNECTED: return None
     
     try:
-        # Debug: on check si la table existe et si on peut lire
         response = supabase.table("citations").select("text, author").eq("type", quote_type).execute()
         
         if response.data and len(response.data) > 0:
             choice = random.choice(response.data)
             return choice
         else:
-            # Si vide, c'est souvent un problème de RLS sur Supabase
             print(f"⚠️ Aucune citation trouvée dans la DB pour le type: '{quote_type}'. Vérifier RLS.")
             return None
     except Exception as e:
@@ -177,9 +182,12 @@ if 'data_loaded' not in st.session_state:
     st.session_state.user_lvl = 1
     st.session_state.game_mode = "Séide"
     st.session_state.current_date = datetime.today().strftime("%Y-%m-%d")
+    st.session_state.user_gender = "Non précisé"
+    st.session_state.user_birth_year = 2000
+    
     st.session_state.active_quote = None 
     st.session_state.reset_step = 0
-    st.session_state.editing_task_id = None # Pour gérer l'édition en ligne
+    st.session_state.editing_task_id = None 
     
     load_data_from_db()
     st.session_state.data_loaded = True
@@ -239,7 +247,7 @@ def edit_task(task_id, new_name):
         if t['id'] == task_id:
             t['name'] = new_name
             break
-    st.session_state.editing_task_id = None # Fin de l'édition
+    st.session_state.editing_task_id = None 
     save_data_to_db()
 
 def delete_task(task_id):
@@ -253,9 +261,7 @@ def get_daily_log(date):
     return None
 
 def check_levelup(date):
-    """Vérifie si l'XP totale permet de monter de niveau."""
     current_lvl = st.session_state.user_lvl
-    # On boucle au cas où on gagne plusieurs niveaux d'un coup
     while True:
         xp_needed_next = get_total_xp_required(current_lvl + 1)
         if st.session_state.user_xp >= xp_needed_next:
@@ -268,9 +274,8 @@ def check_levelup(date):
         log = get_daily_log(date)
         if log: log['level_up'] = True
         
-        # CITATION REUSSITE (Level Up)
         quote = get_random_quote("reussite")
-        set_active_quote(quote, "#2ECC71") # Vert
+        set_active_quote(quote, "#2ECC71")
 
 def validate_task(task_id, date):
     log = get_daily_log(date)
@@ -285,7 +290,6 @@ def validate_task(task_id, date):
     
     if task_id not in log['tasks_completed']:
         log['tasks_completed'].append(task_id)
-        # Gain XP cumulative
         st.session_state.user_xp += FIXED_TASK_XP
         log['xp_snapshot'] = st.session_state.user_xp 
         check_levelup(date)
@@ -304,7 +308,6 @@ def apply_exalte_penalty(log_entry):
             if st.session_state.user_xp < 0:
                 st.session_state.user_xp = 0
             
-            # Gestion de la perte de niveau (Level Down)
             while st.session_state.user_lvl > 1:
                 threshold_current = get_total_xp_required(st.session_state.user_lvl)
                 if st.session_state.user_xp < threshold_current:
@@ -326,13 +329,11 @@ def skip_day():
     apply_exalte_penalty(current_log)
     current_log['xp_snapshot'] = st.session_state.user_xp
     
-    # Check si échec (toutes les tâches non faites)
     total_tasks = len(st.session_state.tasks)
     completed = len(current_log['tasks_completed'])
     if total_tasks > 0 and completed < total_tasks:
-        # CITATION ECHEC/ENCOURAGEMENT
         quote = get_random_quote("echec")
-        set_active_quote(quote, "#E74C3C") # Rouge/Orange
+        set_active_quote(quote, "#E74C3C") 
 
     curr = datetime.strptime(st.session_state.current_date, "%Y-%m-%d")
     st.session_state.current_date = (curr + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -344,7 +345,7 @@ def skip_day():
 if st.session_state.active_quote:
     q = st.session_state.active_quote
     st.markdown(f"""
-    <div class="quote-box" style="border-left: 5px solid {q['color']};">
+    <div class="quote-box">
         <div class="quote-text">"{q['text']}"</div>
         <div class="quote-author">- {q['author']}</div>
     </div>
@@ -357,7 +358,6 @@ if st.session_state.active_quote:
 title_name, title_color = get_current_rank_info()
 st.markdown(f"<h3 style='text-align: center; color: {title_color}; font-family: Patrick Hand, cursive;'>Niveau {st.session_state.user_lvl} - {title_name}</h3>", unsafe_allow_html=True)
 
-# Barre de progression
 current_level_floor = get_total_xp_required(st.session_state.user_lvl)
 next_level_ceiling = get_total_xp_required(st.session_state.user_lvl + 1)
 xp_in_level = st.session_state.user_xp - current_level_floor
@@ -414,13 +414,12 @@ with tabs[0]:
                 skip_day()
                 st.rerun()
         with c2:
-            # Nouveau bouton test : ne donne PAS d'XP
             if st.button("TEST CONNEXION CITATIONS"):
-                test_type = "reussite" # on teste avec 'reussite' car on sait qu'il y en a
+                test_type = "reussite"
                 q = get_random_quote(test_type)
                 if q:
                     set_active_quote(q, "#9B59B6") 
-                    st.success(f"Connexion OK ! Citation chargée : {q['text'][:20]}...")
+                    st.success(f"Connexion OK ! Citation chargée.")
                     st.rerun()
                 else:
                     st.error("Échec connexion. Vérifiez si RLS est 'Disabled' sur la table 'citations' dans Supabase.")
@@ -429,6 +428,20 @@ with tabs[0]:
 with tabs[1]:
     st.header("Configuration")
     
+    st.subheader("Mon Profil")
+    c_genre, c_annee = st.columns(2)
+    with c_genre:
+        new_gender = st.selectbox("Genre", ["Homme", "Femme", "Autre", "Non précisé"], index=["Homme", "Femme", "Autre", "Non précisé"].index(st.session_state.user_gender) if st.session_state.user_gender in ["Homme", "Femme", "Autre", "Non précisé"] else 3)
+    with c_annee:
+        new_year = st.number_input("Année de naissance", min_value=1900, max_value=2025, value=st.session_state.user_birth_year)
+    
+    if new_gender != st.session_state.user_gender or new_year != st.session_state.user_birth_year:
+        st.session_state.user_gender = new_gender
+        st.session_state.user_birth_year = new_year
+        save_data_to_db()
+
+    st.divider()
+
     st.subheader("Mode de Jeu")
     current_mode_index = 0 if st.session_state.game_mode == "Séide" else 1
     new_mode = st.radio(
@@ -447,7 +460,8 @@ with tabs[1]:
     st.subheader(f"Slots de Tâches ({len(st.session_state.tasks)}/{get_max_slots()})")
     
     with st.form("add_task_form", clear_on_submit=True):
-        col_in, col_sub = st.columns([0.7, 0.3])
+        # Alignement vertical BAS pour que le bouton soit en face du champ
+        col_in, col_sub = st.columns([0.7, 0.3], vertical_alignment="bottom")
         with col_in:
             new_task_name = st.text_input("Nouvelle tâche", placeholder="Ex: Faire 50 pompes")
         with col_sub:
@@ -464,9 +478,8 @@ with tabs[1]:
     if st.session_state.tasks:
         st.markdown("##### Mes Tâches")
         for task in st.session_state.tasks:
-            # Mode Édition pour cette tâche spécifique
             if st.session_state.editing_task_id == task['id']:
-                c_edit, c_ok = st.columns([0.8, 0.2])
+                c_edit, c_ok = st.columns([0.8, 0.2], vertical_alignment="bottom")
                 with c_edit:
                     new_val = st.text_input("Nom", value=task['name'], label_visibility="collapsed", key=f"edit_input_{task['id']}")
                 with c_ok:
@@ -474,8 +487,8 @@ with tabs[1]:
                         edit_task(task['id'], new_val)
                         st.rerun()
             else:
-                # Mode Affichage normal
-                c_txt, c_edit_btn, c_del_btn = st.columns([0.7, 0.15, 0.15])
+                # Ajout d'espacement (gap) pour décoller les icones
+                c_txt, c_edit_btn, c_del_btn = st.columns([0.76, 0.12, 0.12], gap="small")
                 with c_txt:
                     st.write(f"• {task['name']}")
                 with c_edit_btn:
