@@ -153,7 +153,8 @@ def get_random_quote(quote_type):
             choice = random.choice(response.data)
             return choice
         else:
-            print(f"⚠️ Aucune citation trouvée dans la DB pour le type: '{quote_type}'")
+            # Si vide, c'est souvent un problème de RLS sur Supabase
+            print(f"⚠️ Aucune citation trouvée dans la DB pour le type: '{quote_type}'. Vérifier RLS.")
             return None
     except Exception as e:
         print(f"❌ Erreur fetch citation: {e}")
@@ -413,10 +414,16 @@ with tabs[0]:
                 skip_day()
                 st.rerun()
         with c2:
-            if st.button("TEST CITATION (Level Up)"):
-                st.session_state.user_xp += 1000 # Force level up fake
-                check_levelup(st.session_state.current_date)
-                st.rerun()
+            # Nouveau bouton test : ne donne PAS d'XP
+            if st.button("TEST CONNEXION CITATIONS"):
+                test_type = "reussite" # on teste avec 'reussite' car on sait qu'il y en a
+                q = get_random_quote(test_type)
+                if q:
+                    set_active_quote(q, "#9B59B6") 
+                    st.success(f"Connexion OK ! Citation chargée : {q['text'][:20]}...")
+                    st.rerun()
+                else:
+                    st.error("Échec connexion. Vérifiez si RLS est 'Disabled' sur la table 'citations' dans Supabase.")
 
 # --- TAB CONFIG ---
 with tabs[1]:
