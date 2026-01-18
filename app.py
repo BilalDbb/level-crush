@@ -130,6 +130,15 @@ def save_data_to_db():
     except Exception as e:
         st.error(f"Erreur sauvegarde DB: {e}")
 
+def reset_user_data():
+    """Réinitialise complètement le profil utilisateur"""
+    st.session_state.tasks = []
+    st.session_state.logs = []
+    st.session_state.user_xp = 0
+    st.session_state.user_lvl = 1
+    # On garde le mode de jeu et la date pour éviter des bugs bizarres
+    save_data_to_db()
+
 # --- GESTION CITATIONS ---
 
 def get_random_quote(quote_type):
@@ -137,16 +146,19 @@ def get_random_quote(quote_type):
     if not DB_CONNECTED: return None
     
     try:
-        # On récupère toutes les citations du type (ex: 'reussite')
+        # On récupère toutes les citations du type
         response = supabase.table("citations").select("text, author").eq("type", quote_type).execute()
         
         if response.data and len(response.data) > 0:
             choice = random.choice(response.data)
             return choice
+        else:
+            # Utile pour le debug si la table est vide ou mal nommée
+            print(f"Aucune citation trouvée pour le type : {quote_type}")
+            return None
     except Exception as e:
         print(f"Erreur fetch citation: {e}")
-    
-    return None
+        return None
 
 def set_active_quote(quote_data, context_color="#ffc107"):
     """Active une citation pour l'afficher à l'utilisateur"""
@@ -165,8 +177,9 @@ if 'data_loaded' not in st.session_state:
     st.session_state.user_lvl = 1
     st.session_state.game_mode = "Séide"
     st.session_state.current_date = datetime.today().strftime("%Y-%m-%d")
-    st.session_state.active_quote = None # Pour stocker la citation affichée
-    st.session_state.notif_shown = False # Pour ne pas spammer la notif de 18h
+    st.session_state.active_quote = None 
+    st.session_state.notif_shown = False
+    st.session_state.reset_step = 0 # 0: rien, 1: demande confirm, 2: reset
     
     load_data_from_db()
     st.session_state.data_loaded = True
@@ -221,6 +234,13 @@ def add_task(name):
     save_data_to_db() 
     return True, "Tâche ajoutée."
 
+def edit_task(task_id, new_name):
+    for t in st.session_state.tasks:
+        if t['id'] == task_id:
+            t['name'] = new_name
+            break
+    save_data_to_db()
+
 def delete_task(task_id):
     st.session_state.tasks = [t for t in st.session_state.tasks if t['id'] != task_id]
     save_data_to_db()
@@ -232,9 +252,7 @@ def get_daily_log(date):
     return None
 
 def check_levelup(date):
-    """Vérifie si l'XP totale permet de monter de niveau."""
     current_lvl = st.session_state.user_lvl
-    # On boucle au cas où on gagne plusieurs niveaux d'un coup
     while True:
         xp_needed_next = get_total_xp_required(current_lvl + 1)
         if st.session_state.user_xp >= xp_needed_next:
@@ -247,7 +265,6 @@ def check_levelup(date):
         log = get_daily_log(date)
         if log: log['level_up'] = True
         
-        # CITATION REUSSITE (Level Up)
         quote = get_random_quote("reussite")
         set_active_quote(quote, "#2ECC71") # Vert
 
@@ -264,7 +281,6 @@ def validate_task(task_id, date):
     
     if task_id not in log['tasks_completed']:
         log['tasks_completed'].append(task_id)
-        # Gain XP cumulative
         st.session_state.user_xp += FIXED_TASK_XP
         log['xp_snapshot'] = st.session_state.user_xp 
         check_levelup(date)
@@ -283,7 +299,6 @@ def apply_exalte_penalty(log_entry):
             if st.session_state.user_xp < 0:
                 st.session_state.user_xp = 0
             
-            # Gestion de la perte de niveau (Level Down)
             while st.session_state.user_lvl > 1:
                 threshold_current = get_total_xp_required(st.session_state.user_lvl)
                 if st.session_state.user_xp < threshold_current:
@@ -305,34 +320,28 @@ def skip_day():
     apply_exalte_penalty(current_log)
     current_log['xp_snapshot'] = st.session_state.user_xp
     
-    # Check si échec (toutes les tâches non faites)
     total_tasks = len(st.session_state.tasks)
     completed = len(current_log['tasks_completed'])
     if total_tasks > 0 and completed < total_tasks:
-        # CITATION ECHEC/ENCOURAGEMENT
         quote = get_random_quote("echec")
-        set_active_quote(quote, "#E74C3C") # Rouge/Orange
+        set_active_quote(quote, "#E74C3C")
 
     curr = datetime.strptime(st.session_state.current_date, "%Y-%m-%d")
     st.session_state.current_date = (curr + timedelta(days=1)).strftime("%Y-%m-%d")
-    st.session_state.notif_shown = False # Reset notif flag pour le nouveau jour
+    st.session_state.notif_shown = False 
     save_data_to_db()
 
 # --- LOGIQUE NOTIFICATION 18H ---
-# Se lance à chaque rechargement de page
 now = datetime.now()
 if now.hour >= 18 and not st.session_state.notif_shown:
-    # Vérifier si tâches incomplètes
     log = get_daily_log(st.session_state.current_date)
     done_count = len(log['tasks_completed']) if log else 0
     total_count = len(st.session_state.tasks)
     
     if total_count > 0 and done_count < total_count:
-        # CITATION MOTIVATION (NOTIF)
         quote = get_random_quote("notif")
-        # On ne l'affiche que si aucune autre quote n'est déjà active pour éviter les conflits
         if quote and st.session_state.active_quote is None:
-            set_active_quote(quote, "#F1C40F") # Jaune
+            set_active_quote(quote, "#F1C40F") 
             st.session_state.notif_shown = True
 
 
@@ -355,7 +364,6 @@ if st.session_state.active_quote:
 title_name, title_color = get_current_rank_info()
 st.markdown(f"<h3 style='text-align: center; color: {title_color}; font-family: Patrick Hand, cursive;'>Niveau {st.session_state.user_lvl} - {title_name}</h3>", unsafe_allow_html=True)
 
-# Barre de progression
 current_level_floor = get_total_xp_required(st.session_state.user_lvl)
 next_level_ceiling = get_total_xp_required(st.session_state.user_lvl + 1)
 xp_in_level = st.session_state.user_xp - current_level_floor
@@ -412,13 +420,16 @@ with tabs[0]:
                 skip_day()
                 st.rerun()
         with c2:
-            if st.button("HARD RESET DB", type="primary"):
-                st.session_state.tasks = []
-                st.session_state.logs = []
-                st.session_state.user_xp = 0
-                st.session_state.user_lvl = 1
-                save_data_to_db()
-                st.rerun()
+            if st.button("TEST CITATION (Random)"):
+                # Test pour voir si ça marche
+                test_type = random.choice(["notif", "reussite", "echec"])
+                q = get_random_quote(test_type)
+                if q:
+                    set_active_quote(q, "#9B59B6") # Violet pour test
+                    st.success(f"Citation trouvée (Type: {test_type})")
+                    st.rerun()
+                else:
+                    st.error(f"Aucune citation trouvée pour '{test_type}'. Vérifie Supabase.")
 
 # --- TAB CONFIG ---
 with tabs[1]:
@@ -441,6 +452,7 @@ with tabs[1]:
 
     st.subheader(f"Slots de Tâches ({len(st.session_state.tasks)}/{get_max_slots()})")
     
+    # AJOUT
     with st.form("add_task_form", clear_on_submit=True):
         col_in, col_sub = st.columns([0.7, 0.3])
         with col_in:
@@ -455,17 +467,28 @@ with tabs[1]:
                 st.rerun()
             else:
                 st.error(msg)
-    
+
+    # MODIFICATION / SUPPRESSION
     if st.session_state.tasks:
+        st.markdown("##### Modifier / Supprimer")
         for task in st.session_state.tasks:
-            c1, c2, c3 = st.columns([0.6, 0.2, 0.2])
+            c1, c2 = st.columns([0.8, 0.2])
             with c1:
-                st.write(f"- {task['name']}")
+                st.write(f"• {task['name']}")
             with c2:
-                pass 
-            with c3:
                 if st.button("🗑️", key=f"del_{task['id']}"):
                     delete_task(task['id'])
+                    st.rerun()
+        
+        st.caption("Pour modifier, utilisez le menu ci-dessous :")
+        task_to_edit = st.selectbox("Sélectionner la tâche à modifier :", st.session_state.tasks, format_func=lambda x: x['name'])
+        
+        if task_to_edit:
+            new_edit_name = st.text_input("Nouveau nom", value=task_to_edit['name'], key=f"edit_inp_{task_to_edit['id']}")
+            if st.button("Sauvegarder la modification"):
+                if new_edit_name and new_edit_name != task_to_edit['name']:
+                    edit_task(task_to_edit['id'], new_edit_name)
+                    st.success("Modifié !")
                     st.rerun()
     
     st.divider()
@@ -476,6 +499,27 @@ with tabs[1]:
                 st.markdown(f"<span style='color:{t_color}'><b>Lvl {t_lvl} : {t_name}</b></span>", unsafe_allow_html=True)
             else:
                 st.markdown(f"<span style='color:#ccc'>Lvl {t_lvl} : ???</span>", unsafe_allow_html=True)
+
+    st.divider()
+
+    # --- ZONE DANGER (RESET USER) ---
+    st.markdown("### ☠️ Zone de Danger")
+    if st.button("🔴 TOUT RECOMMENCER (Reset Aventure)"):
+        st.session_state.reset_step = 1
+    
+    if st.session_state.reset_step == 1:
+        st.warning("⚠️ ATTENTION : Cela va effacer TOUT votre historique, XP, Niveaux et Tâches. Cette action est irréversible.")
+        col_r1, col_r2 = st.columns(2)
+        with col_r1:
+            if st.button("✅ OUI, JE SUIS SÛR À 100%"):
+                reset_user_data()
+                st.session_state.reset_step = 0
+                st.success("Données effacées. Nouvelle aventure !")
+                st.rerun()
+        with col_r2:
+            if st.button("❌ ANNULER"):
+                st.session_state.reset_step = 0
+                st.rerun()
 
 # --- TAB PROGRESSION ---
 with tabs[2]:
