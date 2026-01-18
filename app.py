@@ -34,7 +34,7 @@ TITLES = [
     (93, "Souverain", "#8E44AD"), (100, "LEVEL CRUSHER", "#000000")
 ]
 
-# --- STYLE CSS (POLICE MANUSCRITE & DESIGN PAPIER) ---
+# --- STYLE CSS (POLICE MANUSCRITE & DESIGN PAPIER REALISTE) ---
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Patrick+Hand&display=swap');
@@ -54,35 +54,56 @@ st.markdown("""
         font-family: 'Patrick Hand', cursive; 
     }
     
-    /* Design Papier Déchiré */
-    .quote-box {
+    /* Design Note Manuscrite Réaliste */
+    .quote-container {
         position: relative;
-        background-color: #fffdf0; /* Couleur papier beige clair */
-        padding: 25px;
-        margin-bottom: 20px;
-        box-shadow: 3px 3px 10px rgba(0,0,0,0.1); /* Ombre douce */
-        /* Effet bord déchiré en bas via clip-path */
-        clip-path: polygon(
-            0% 0%, 100% 0%, 100% 100%, 
-            95% 98%, 90% 100%, 85% 98%, 80% 100%, 
-            75% 98%, 70% 100%, 65% 98%, 60% 100%, 
-            55% 98%, 50% 100%, 45% 98%, 40% 100%, 
-            35% 98%, 30% 100%, 25% 98%, 20% 100%, 
-            15% 98%, 10% 100%, 5% 98%, 0% 100%
-        );
+        margin: 20px auto;
+        width: 90%;
     }
+    
+    .quote-box {
+        background-color: #fdfbf7; /* Blanc cassé papier */
+        padding: 30px;
+        color: #2c2c2c;
+        /* Bordure asymétrique pour effet papier */
+        border-radius: 255px 15px 225px 15px / 15px 225px 15px 255px;
+        box-shadow: 
+            2px 5px 15px rgba(0,0,0,0.1), /* Ombre portée */
+            inset 0 0 20px rgba(0,0,0,0.02); /* Texture interne */
+        border: 1px solid #e0e0e0;
+        position: relative;
+        transform: rotate(-1deg); /* Légère rotation naturelle */
+    }
+    
     .quote-text {
-        font-size: 1.3rem; /* Légèrement plus petit */
+        font-size: 1.4rem;
         font-style: italic;
-        color: #4a4a4a; /* Gris foncé style encre/crayon */
         text-align: center;
-        line-height: 1.5;
+        margin-bottom: 15px;
+        line-height: 1.4;
     }
+    
     .quote-author {
         text-align: right;
-        margin-top: 15px;
-        color: #777;
         font-size: 1rem;
+        color: #666;
+        font-weight: bold;
+    }
+    
+    /* Croix de fermeture style gribouillage */
+    .close-btn {
+        position: absolute;
+        top: 10px;
+        right: 15px;
+        cursor: pointer;
+        font-size: 1.2rem;
+        color: #999;
+        font-weight: bold;
+        border: none;
+        background: none;
+    }
+    .close-btn:hover {
+        color: #ff4b4b;
     }
     
     .task-container {
@@ -348,18 +369,27 @@ def skip_day():
 
 # --- UI LAYOUT ---
 
-# 0. AFFICHAGE CITATION ACTIVE (Style Papier)
+# 0. AFFICHAGE CITATION ACTIVE (Design Note Papier)
 if st.session_state.active_quote:
     q = st.session_state.active_quote
+    
+    # On utilise st.columns pour superposer la croix de fermeture
+    # Mais le HTML est plus simple pour le style exact
     st.markdown(f"""
-    <div class="quote-box">
-        <div class="quote-text">"{q['text']}"</div>
-        <div class="quote-author">- {q['author']}</div>
+    <div class="quote-container">
+        <div class="quote-box">
+            <div class="quote-text">"{q['text']}"</div>
+            <div class="quote-author">- {q['author']}</div>
+        </div>
     </div>
     """, unsafe_allow_html=True)
-    if st.button("Fermer le message"):
-        st.session_state.active_quote = None
-        st.rerun()
+    
+    # Petit bouton discret pour fermer (centré sous la note ou aligné à droite)
+    col_close, _ = st.columns([0.2, 0.8])
+    with col_close:
+        if st.button("✕ Fermer", key="close_quote_btn"):
+            st.session_state.active_quote = None
+            st.rerun()
 
 # 1. EN-TÊTE
 title_name, title_color = get_current_rank_info()
@@ -378,7 +408,7 @@ else:
 st.progress(progress_val)
 st.caption(f"XP: {int(st.session_state.user_xp)} / {int(next_level_ceiling)} (Total)")
 
-# 2. TABS (Nouvel ordre)
+# 2. TABS
 tabs = st.tabs(["📜 Quête", "📈 Progression", "🛠 Configuration"])
 
 # --- TAB QUÊTE ---
@@ -431,7 +461,7 @@ with tabs[0]:
                 else:
                     st.error("Échec connexion.")
 
-# --- TAB PROGRESSION (Déplacé ici) ---
+# --- TAB PROGRESSION ---
 with tabs[1]:
     st.header("Graphique")
     
@@ -496,7 +526,7 @@ with tabs[1]:
     else:
         st.info("Synchronisation DB... ou aucune donnée disponible.")
 
-# --- TAB CONFIGURATION (Déplacé à la fin) ---
+# --- TAB CONFIGURATION ---
 with tabs[2]:
     st.header("Configuration")
     
@@ -558,7 +588,6 @@ with tabs[2]:
                         edit_task(task['id'], new_val)
                         st.rerun()
             else:
-                # Ajout d'espacement (gap) pour décoller les icones
                 c_txt, c_edit_btn, c_del_btn = st.columns([0.76, 0.12, 0.12], gap="small")
                 with c_txt:
                     st.write(f"• {task['name']}")
