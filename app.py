@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
+import random
 from datetime import datetime, timedelta
 from supabase import create_client, Client
 
@@ -43,7 +43,7 @@ st.markdown("""
         font-family: 'Patrick Hand', cursive;
     }
     
-    p, label, .stMarkdown {
+    p, label, .stMarkdown, .stAlert {
         font-size: 1.1rem !important;
     }
 
@@ -52,6 +52,26 @@ st.markdown("""
         border-radius: 10px;
         font-weight: bold;
         font-family: 'Patrick Hand', cursive; 
+    }
+    
+    .quote-box {
+        padding: 20px;
+        border-radius: 10px;
+        background-color: #fff3cd;
+        border-left: 5px solid #ffc107;
+        margin-bottom: 20px;
+        box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+    }
+    .quote-text {
+        font-size: 1.4rem;
+        font-style: italic;
+        color: #555;
+    }
+    .quote-author {
+        text-align: right;
+        font-weight: bold;
+        margin-top: 10px;
+        color: #333;
     }
     
     .task-container {
@@ -110,6 +130,32 @@ def save_data_to_db():
     except Exception as e:
         st.error(f"Erreur sauvegarde DB: {e}")
 
+# --- GESTION CITATIONS ---
+
+def get_random_quote(quote_type):
+    """Récupère une citation aléatoire du type demandé depuis Supabase"""
+    if not DB_CONNECTED: return None
+    
+    try:
+        # On récupère toutes les citations du type (ex: 'reussite')
+        response = supabase.table("citations").select("text, author").eq("type", quote_type).execute()
+        
+        if response.data and len(response.data) > 0:
+            choice = random.choice(response.data)
+            return choice
+    except Exception as e:
+        print(f"Erreur fetch citation: {e}")
+    
+    return None
+
+def set_active_quote(quote_data, context_color="#ffc107"):
+    """Active une citation pour l'afficher à l'utilisateur"""
+    if quote_data:
+        st.session_state.active_quote = {
+            "text": quote_data['text'],
+            "author": quote_data['author'],
+            "color": context_color
+        }
 
 # --- INITIALISATION SESSION STATE ---
 if 'data_loaded' not in st.session_state:
@@ -119,6 +165,8 @@ if 'data_loaded' not in st.session_state:
     st.session_state.user_lvl = 1
     st.session_state.game_mode = "Séide"
     st.session_state.current_date = datetime.today().strftime("%Y-%m-%d")
+    st.session_state.active_quote = None # Pour stocker la citation affichée
+    st.session_state.notif_shown = False # Pour ne pas spammer la notif de 18h
     
     load_data_from_db()
     st.session_state.data_loaded = True
@@ -127,36 +175,18 @@ if 'data_loaded' not in st.session_state:
 FIXED_TASK_XP = 229
 
 def get_level_cost(level):
-    """
-    Calcule le coût en XP pour compléter le niveau 'level' (passer de level à level+1).
-    Formule: Coeff * (niveau^1.2)
-    """
     exponent = 1.2
     coeff = 30
-    
-    if level <= 5:
-        coeff = 150
-    elif 6 <= level <= 10:
-        coeff = 80
-    
+    if level <= 5: coeff = 150
+    elif 6 <= level <= 10: coeff = 80
     return coeff * (level ** exponent)
 
 def get_total_xp_required(target_level):
-    """
-    Calcule l'XP TOTAL cumulé requis pour atteindre le 'target_level'.
-    """
-    if target_level == 1:
-        return 0
-    
-    # Règle spéciale lvl 100
-    if target_level == 100:
-        return get_total_xp_required(99) * 2
-        
+    if target_level == 1: return 0
+    if target_level == 100: return get_total_xp_required(99) * 2
     total = 0
-    # On somme les coûts de tous les niveaux précédents
     for lvl in range(1, target_level):
         total += get_level_cost(lvl)
-        
     return total
 
 # --- FONCTIONS LOGIQUES ---
@@ -209,7 +239,6 @@ def check_levelup(date):
         xp_needed_next = get_total_xp_required(current_lvl + 1)
         if st.session_state.user_xp >= xp_needed_next:
             current_lvl += 1
-            # Pas de ballons
         else:
             break
             
@@ -217,6 +246,10 @@ def check_levelup(date):
         st.session_state.user_lvl = current_lvl
         log = get_daily_log(date)
         if log: log['level_up'] = True
+        
+        # CITATION REUSSITE (Level Up)
+        quote = get_random_quote("reussite")
+        set_active_quote(quote, "#2ECC71") # Vert
 
 def validate_task(task_id, date):
     log = get_daily_log(date)
@@ -238,9 +271,6 @@ def validate_task(task_id, date):
         save_data_to_db()
 
 def apply_exalte_penalty(log_entry):
-    """
-    En mode Exalté, retire l'XP équivalent au gain pour chaque tâche ratée.
-    """
     if st.session_state.game_mode == "Exalté":
         total_tasks = len(st.session_state.tasks)
         completed = len(log_entry['tasks_completed'])
@@ -254,7 +284,6 @@ def apply_exalte_penalty(log_entry):
                 st.session_state.user_xp = 0
             
             # Gestion de la perte de niveau (Level Down)
-            # Si l'XP passe sous le seuil du niveau actuel
             while st.session_state.user_lvl > 1:
                 threshold_current = get_total_xp_required(st.session_state.user_lvl)
                 if st.session_state.user_xp < threshold_current:
@@ -275,18 +304,58 @@ def skip_day():
     
     apply_exalte_penalty(current_log)
     current_log['xp_snapshot'] = st.session_state.user_xp
+    
+    # Check si échec (toutes les tâches non faites)
+    total_tasks = len(st.session_state.tasks)
+    completed = len(current_log['tasks_completed'])
+    if total_tasks > 0 and completed < total_tasks:
+        # CITATION ECHEC/ENCOURAGEMENT
+        quote = get_random_quote("echec")
+        set_active_quote(quote, "#E74C3C") # Rouge/Orange
 
     curr = datetime.strptime(st.session_state.current_date, "%Y-%m-%d")
     st.session_state.current_date = (curr + timedelta(days=1)).strftime("%Y-%m-%d")
+    st.session_state.notif_shown = False # Reset notif flag pour le nouveau jour
     save_data_to_db()
 
+# --- LOGIQUE NOTIFICATION 18H ---
+# Se lance à chaque rechargement de page
+now = datetime.now()
+if now.hour >= 18 and not st.session_state.notif_shown:
+    # Vérifier si tâches incomplètes
+    log = get_daily_log(st.session_state.current_date)
+    done_count = len(log['tasks_completed']) if log else 0
+    total_count = len(st.session_state.tasks)
+    
+    if total_count > 0 and done_count < total_count:
+        # CITATION MOTIVATION (NOTIF)
+        quote = get_random_quote("notif")
+        # On ne l'affiche que si aucune autre quote n'est déjà active pour éviter les conflits
+        if quote and st.session_state.active_quote is None:
+            set_active_quote(quote, "#F1C40F") # Jaune
+            st.session_state.notif_shown = True
+
+
 # --- UI LAYOUT ---
+
+# 0. AFFICHAGE CITATION ACTIVE
+if st.session_state.active_quote:
+    q = st.session_state.active_quote
+    st.markdown(f"""
+    <div class="quote-box" style="border-left: 5px solid {q['color']};">
+        <div class="quote-text">"{q['text']}"</div>
+        <div class="quote-author">- {q['author']}</div>
+    </div>
+    """, unsafe_allow_html=True)
+    if st.button("Fermer le message"):
+        st.session_state.active_quote = None
+        st.rerun()
 
 # 1. EN-TÊTE
 title_name, title_color = get_current_rank_info()
 st.markdown(f"<h3 style='text-align: center; color: {title_color}; font-family: Patrick Hand, cursive;'>Niveau {st.session_state.user_lvl} - {title_name}</h3>", unsafe_allow_html=True)
 
-# Barre de progression (Calculée relative au niveau en cours)
+# Barre de progression
 current_level_floor = get_total_xp_required(st.session_state.user_lvl)
 next_level_ceiling = get_total_xp_required(st.session_state.user_lvl + 1)
 xp_in_level = st.session_state.user_xp - current_level_floor
