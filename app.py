@@ -4,7 +4,9 @@ import matplotlib.pyplot as plt
 import random
 import json
 from datetime import datetime, timedelta
+# Assurez-vous d'avoir installé : pip install supabase gotrue
 from supabase import create_client, Client
+from gotrue.errors import AuthApiError
 
 # --- CONFIGURATION SUPABASE ---
 try:
@@ -16,10 +18,7 @@ except Exception as e:
     DB_CONNECTED = False
     st.warning("Base de données non connectée. Vérifiez le fichier .streamlit/secrets.toml")
 
-# Nom de la table et ID utilisateur
-TABLE_NAME = "profiles" 
-USER_ID = "shadow_monarch_01"
-APP_VERSION = "v1.0.0"
+APP_VERSION = "v1.0.1-beta"
 
 # --- CONFIGURATION DE LA PAGE ---
 st.set_page_config(page_title="Task RPG", page_icon="⚔️")
@@ -45,7 +44,7 @@ st.markdown("""
         font-family: 'Patrick Hand', cursive;
     }
     
-    p, label, .stMarkdown, .stAlert, .stSelectbox, .stNumberInput, .stCheckbox {
+    p, label, .stMarkdown, .stAlert, .stSelectbox, .stNumberInput, .stCheckbox, .stTextInput {
         font-size: 1.1rem !important;
     }
 
@@ -113,12 +112,85 @@ st.markdown("""
         margin-bottom: 10px;
         border-left: 5px solid #ccc;
     }
+    
+    /* Login Box Style */
+    .login-box {
+        padding: 2rem;
+        border-radius: 10px;
+        background: white;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
 
-# --- GESTION PERSISTANCE (SUPABASE) ---
+# --- SYSTEME AUTHENTIFICATION ---
+
+if 'user' not in st.session_state:
+    st.session_state.user = None
+
+def handle_login(email, password):
+    try:
+        response = supabase.auth.sign_in_with_password({"email": email, "password": password})
+        st.session_state.user = response.user
+        st.rerun()
+    except AuthApiError as e:
+        st.error(f"Erreur de connexion : {e}")
+    except Exception as e:
+        st.error(f"Erreur inattendue : {e}")
+
+def handle_signup(email, password):
+    try:
+        response = supabase.auth.sign_up({"email": email, "password": password})
+        if response.user:
+            st.session_state.user = response.user
+            st.success("Compte créé avec succès ! Vous êtes connecté.")
+            st.rerun()
+    except AuthApiError as e:
+        st.error(f"Erreur d'inscription : {e}")
+
+def handle_logout():
+    supabase.auth.sign_out()
+    st.session_state.user = None
+    # Reset des données locales
+    for key in ['tasks', 'logs', 'user_xp', 'data_loaded']:
+        if key in st.session_state:
+            del st.session_state[key]
+    st.rerun()
+
+# --- BLOCAGE DE L'INTERFACE SI PAS CONNECTÉ ---
+
+if not st.session_state.user:
+    st.markdown("<h1 style='text-align: center; font-family: Patrick Hand, cursive;'>⚔️ Task RPG</h1>", unsafe_allow_html=True)
+    st.markdown("<h3 style='text-align: center; color: #555;'>Connectez-vous pour commencer votre aventure</h3>", unsafe_allow_html=True)
+    
+    tab_login, tab_signup = st.tabs(["Se connecter", "Créer un compte"])
+    
+    with tab_login:
+        with st.form("login_form"):
+            email = st.text_input("Email")
+            password = st.text_input("Mot de passe", type="password")
+            submit = st.form_submit_button("Connexion")
+            if submit:
+                handle_login(email, password)
+                
+    with tab_signup:
+        with st.form("signup_form"):
+            st.info("Inscription : L'essai gratuit de 7 jours démarre aujourd'hui.")
+            new_email = st.text_input("Email")
+            new_password = st.text_input("Mot de passe", type="password")
+            submit_signup = st.form_submit_button("S'inscrire")
+            if submit_signup:
+                handle_signup(new_email, new_password)
+    
+    st.stop() # Arrête le script ici si pas connecté
+
+# --- L'UTILISATEUR EST CONNECTÉ : RÉCUPÉRATION ID ---
+USER_ID = st.session_state.user.id
+
+# --- GESTION PERSISTANCE & ABONNEMENT ---
 
 def load_data_from_db():
     """Charge les données JSON depuis Supabase dans le session_state"""
@@ -138,7 +210,18 @@ def load_data_from_db():
             st.session_state.user_gender = data.get('user_gender', "Non précisé")
             st.session_state.user_birth_year = data.get('user_birth_year', 2000)
             st.session_state.user_consent = data.get('user_consent', False)
+            
+            # Gestion Abonnement / Essai
+            st.session_state.is_premium = data.get('is_premium', False)
+            if 'trial_start_date' not in data:
+                st.session_state.trial_start_date = datetime.now().isoformat()
+                save_data_to_db()
+            else:
+                st.session_state.trial_start_date = data['trial_start_date']
+                
         else:
+            # Premier lancement pour cet user
+            st.session_state.trial_start_date = datetime.now().isoformat()
             save_data_to_db() 
             
     except Exception as e:
@@ -157,7 +240,9 @@ def save_data_to_db():
         "current_date": st.session_state.get('current_date', datetime.today().strftime("%Y-%m-%d")),
         "user_gender": st.session_state.get('user_gender', "Non précisé"),
         "user_birth_year": st.session_state.get('user_birth_year', 2000),
-        "user_consent": st.session_state.get('user_consent', False)
+        "user_consent": st.session_state.get('user_consent', False),
+        "is_premium": st.session_state.get('is_premium', False),
+        "trial_start_date": st.session_state.get('trial_start_date', datetime.now().isoformat())
     }
     
     try:
@@ -180,12 +265,9 @@ def reset_user_data():
 # --- GESTION CITATIONS ---
 
 def get_random_quote(quote_type):
-    """Récupère une citation aléatoire du type demandé depuis Supabase"""
     if not DB_CONNECTED: return None
-    
     try:
         response = supabase.table("citations").select("text, author").eq("type", quote_type).execute()
-        
         if response.data and len(response.data) > 0:
             choice = random.choice(response.data)
             return choice
@@ -197,14 +279,13 @@ def get_random_quote(quote_type):
         return None
 
 def set_active_quote(quote_data):
-    """Active une citation pour l'afficher à l'utilisateur"""
     if quote_data:
         st.session_state.active_quote = {
             "text": quote_data['text'],
             "author": quote_data['author']
         }
 
-# --- INITIALISATION SESSION STATE ---
+# --- INITIALISATION SESSION STATE (POST-LOGIN) ---
 if 'data_loaded' not in st.session_state:
     st.session_state.tasks = []
     st.session_state.logs = []
@@ -215,6 +296,8 @@ if 'data_loaded' not in st.session_state:
     st.session_state.user_gender = "Non précisé"
     st.session_state.user_birth_year = 2000
     st.session_state.user_consent = False
+    st.session_state.is_premium = False
+    st.session_state.trial_start_date = datetime.now().isoformat()
     
     st.session_state.active_quote = None 
     st.session_state.reset_step = 0
@@ -222,6 +305,46 @@ if 'data_loaded' not in st.session_state:
     
     load_data_from_db()
     st.session_state.data_loaded = True
+
+# --- LOGIQUE DE BLOCAGE (FIN D'ESSAI) ---
+def check_subscription_status():
+    """Vérifie si l'utilisateur peut accéder à l'app"""
+    if st.session_state.is_premium:
+        return True, "Premium"
+    
+    # Calcul des jours restants
+    try:
+        start_date = datetime.fromisoformat(st.session_state.trial_start_date)
+        days_passed = (datetime.now() - start_date).days
+        days_left = 7 - days_passed
+        
+        if days_left < 0:
+            return False, "Expired"
+        return True, f"{days_left} jours d'essai restants"
+    except:
+        return True, "Erreur Date (Accès autorisé)"
+
+access_granted, status_msg = check_subscription_status()
+
+# Si période d'essai terminée et pas premium -> BLOQUER
+if not access_granted:
+    st.error("🔒 Votre période d'essai de 7 jours est terminée.")
+    st.markdown("""
+    Pour continuer à gagner de l'XP et gérer vos tâches, passez à la version complète.
+    
+    **Prix : 2€ / mois**
+    """)
+    if st.button("S'abonner (Simulation)"):
+        # Ici, ce serait le lien vers le paiement Google Play ou Stripe
+        st.session_state.is_premium = True
+        save_data_to_db()
+        st.success("Merci ! Abonnement activé. Bienvenue chez les Hunters.")
+        st.rerun()
+    
+    if st.button("Se déconnecter"):
+        handle_logout()
+    
+    st.stop() # Arrête le reste de l'app
 
 # --- CONSTANTES & LOGIQUE XP ---
 FIXED_TASK_XP = 229
@@ -392,8 +515,13 @@ if st.session_state.active_quote:
             st.rerun()
 
 # 1. EN-TÊTE
-title_name, title_color = get_current_rank_info()
-st.markdown(f"<h3 style='text-align: center; color: {title_color}; font-family: Patrick Hand, cursive;'>Niveau {st.session_state.user_lvl} - {title_name}</h3>", unsafe_allow_html=True)
+col_titre, col_logout = st.columns([0.8, 0.2])
+with col_titre:
+    title_name, title_color = get_current_rank_info()
+    st.markdown(f"<h3 style='text-align: center; color: {title_color}; font-family: Patrick Hand, cursive;'>Niveau {st.session_state.user_lvl} - {title_name}</h3>", unsafe_allow_html=True)
+with col_logout:
+    if st.button("Déconnexion", key="logout_top"):
+        handle_logout()
 
 current_level_floor = get_total_xp_required(st.session_state.user_lvl)
 next_level_ceiling = get_total_xp_required(st.session_state.user_lvl + 1)
@@ -406,7 +534,7 @@ else:
     progress_val = 1.0
 
 st.progress(progress_val)
-st.caption(f"XP: {int(st.session_state.user_xp)} / {int(next_level_ceiling)} (Total)")
+st.caption(f"XP: {int(st.session_state.user_xp)} / {int(next_level_ceiling)} (Total) | {status_msg}")
 
 # 2. TABS
 tabs = st.tabs(["📜 Quête", "📈 Progression", "🛠 Configuration"])
@@ -677,3 +805,4 @@ with tabs[2]:
 # pandas
 # matplotlib
 # supabase
+# gotrue
